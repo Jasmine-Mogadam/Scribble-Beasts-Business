@@ -21,5 +21,5 @@
     "sourceType": "module",
     "ecmaVersion": 2020
   },
-  "ignorePatterns": ["node_modules", "dist", "public"]
+  "ignorePatterns": ["node_modules", "dist", "public", "worker-configuration.d.ts", ".wrangler"]
 }

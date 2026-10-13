@@ -1,0 +1,16 @@
+{
+  // Typecheck for the Cloudflare Worker / Durable Object build (bundled by wrangler).
+  // Runtime types come from `npm run cf:types` (src/worker/worker-configuration.d.ts).
+  "compilerOptions": {
+    "target": "es2022",
+    "module": "es2022",
+    "moduleResolution": "bundler",
+    "lib": ["es2023"],
+    "types": ["node"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true
+  },
+  "include": ["src/worker/**/*", "../shared/**/*"]
+}

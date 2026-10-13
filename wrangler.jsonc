@@ -1,0 +1,46 @@
+// Cloudflare Workers deployment for Scribble Beasts.
+// One Worker serves the client (static assets) and routes each room's
+// WebSocket to its own Durable Object. See DEPLOY_CLOUDFLARE.md.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "scribble-beasts",
+  "main": "server/src/worker/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+
+  "assets": {
+    "directory": "client/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    // Only /api/* reaches the Worker; static files are served directly (free, unmetered)
+    "run_worker_first": ["/api/*"]
+  },
+
+  "durable_objects": {
+    "bindings": [{ "name": "GAME_ROOM", "class_name": "GameRoom" }]
+  },
+  // SQLite-backed classes are required on the Workers Free plan
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["GameRoom"] }],
+
+  "observability": { "enabled": true },
+
+  // Production hostnames. Remove the existing DNS records for these names
+  // (currently proxied to fly.io) before the first deploy, or it will fail.
+  "routes": [
+    { "pattern": "scribble-beasts.com", "custom_domain": true },
+    { "pattern": "www.scribble-beasts.com", "custom_domain": true }
+  ],
+
+  "env": {
+    // `npm run cf:deploy:preview` -> scribble-beasts-preview.<account>.workers.dev
+    // Safe to deploy any time; doesn't touch the production domain.
+    "preview": {
+      "name": "scribble-beasts-preview",
+      "routes": [],
+      "workers_dev": true,
+      "durable_objects": {
+        "bindings": [{ "name": "GAME_ROOM", "class_name": "GameRoom" }]
+      }
+    }
+  }
+}

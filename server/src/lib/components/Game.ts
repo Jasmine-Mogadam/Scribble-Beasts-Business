@@ -219,7 +219,7 @@ export class Game {
                 }
                 if (roundHandler(action, p)) {
                   this.players.forEach((other) => {
-                    if (other.id !== p.id) {
+                    if (other.id !== p.id && !other.disconnected) {
                       other.sendAction(new Actions.PlayerDone(p.name));
                     }
                   });

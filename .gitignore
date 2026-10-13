@@ -146,3 +146,7 @@ shared/actions/index.d.ts
 
 # macOS system files
 .DS_Store
+
+# Cloudflare
+.wrangler/
+.dev.vars

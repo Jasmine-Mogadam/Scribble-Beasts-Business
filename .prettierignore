@@ -1,1 +1,2 @@
 .dockerignore
+server/src/worker/worker-configuration.d.ts
