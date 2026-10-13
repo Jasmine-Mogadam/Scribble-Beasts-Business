@@ -1,40 +1,23 @@
-import express from 'express';
-import { WebSocket, WebSocketServer } from 'ws';
-import { handleNewConnection } from './lib/scripts/roomless-handler.js';
+import { createServer } from './app.js';
+import { Rooms } from './lib/components/Room.js';
 
-const app = express();
 if (!process.env.SERVER_PORT) {
   throw new Error('Missing SERVER_PORT in environment variables');
 }
-const SERVER_PORT = process.env.SERVER_PORT;
+const SERVER_PORT = Number(process.env.SERVER_PORT);
 
-// Health check endpoint
-app.get('/', (req, res) => {
-  res.send('OK');
-});
-
-// Create HTTP server
-const httpServer = app.listen(Number(SERVER_PORT), '0.0.0.0', () => {
-  console.log(`Server is running at http://0.0.0.0:${SERVER_PORT}/`);
+const server = createServer(SERVER_PORT, Rooms);
+server.ready.then((port) => {
+  console.log(`Server is running at http://0.0.0.0:${port}/`);
   console.log(
     `Ngnix is running at http://localhost:${process.env.NGINX_PORT}/`,
   );
 });
 
-// Create WebSocket server attached to HTTP server
-const wss = new WebSocketServer({ server: httpServer });
-
-wss.on('connection', function connection(ws: WebSocket, req) {
-  handleNewConnection(ws, req);
-});
-
 // Graceful shutdown handler
 function shutdownHandler(signal: string) {
   console.log(`Received signal ${signal}. Closing server...`);
-
-  httpServer.close(() => {
-    process.exit(0);
-  });
+  server.close().then(() => process.exit(0));
 }
 
 // Register signals for graceful shutdown

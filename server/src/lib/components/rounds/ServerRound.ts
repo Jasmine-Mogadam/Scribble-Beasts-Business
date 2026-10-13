@@ -26,4 +26,7 @@ export abstract class ServerRound {
 
   /** Called when a player reconnects mid-round. Send any round-specific state they need. */
   sendReconnectState(_player: Player): void {}
+
+  /** Called when the round ends or the game is aborted. Clear any timers here. */
+  cleanup(): void {}
 }

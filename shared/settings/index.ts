@@ -37,3 +37,33 @@ export const DEFAULT_ROOM_SETTINGS: RoomSettings = {
   captions: true,
   roundTimers: {},
 };
+
+const MAX_ROUND_TIMER_SECONDS = 60 * 60;
+
+/**
+ * Coerce untrusted input (client payloads, localStorage) into valid RoomSettings.
+ * Unknown keys are dropped and round timers must be finite, positive numbers.
+ */
+export function normalizeRoomSettings(settings?: Partial<RoomSettings> | null): RoomSettings {
+  const source = (settings && typeof settings === 'object' ? settings : {}) as Partial<RoomSettings>;
+  const roundTimers: Partial<Record<RoundEnum, number>> = {};
+  const rawTimers = source.roundTimers;
+  if (rawTimers && typeof rawTimers === 'object') {
+    for (const [round, value] of Object.entries(rawTimers)) {
+      if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+        roundTimers[round as RoundEnum] = Math.min(Math.round(value), MAX_ROUND_TIMER_SECONDS);
+      }
+    }
+  }
+  return {
+    allowSelfVote: !!source.allowSelfVote,
+    skipIntro: !!source.skipIntro,
+    skipTutorials: !!source.skipTutorials,
+    soundMode:
+      source.soundMode === 'shared' || source.soundMode === 'none'
+        ? source.soundMode
+        : 'separate',
+    captions: source.captions === undefined ? DEFAULT_ROOM_SETTINGS.captions : !!source.captions,
+    roundTimers,
+  };
+}

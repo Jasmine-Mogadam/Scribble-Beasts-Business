@@ -40,6 +40,22 @@ export const enum ActionEnum {
   PLAYER_DONE = 'PLAYER_DONE',
   SEND_ALL_BEASTS = 'SEND_ALL_BEASTS',
   SEND_WINNERS = 'SEND_WINNERS',
+  /** Server: the game finished, everyone goes back to the lobby */
+  END_GAME = 'END_GAME',
+  /** Server: this client's saved session can't be resumed (room gone / player removed) */
+  SESSION_ENDED = 'SESSION_ENDED',
+  /** Heartbeat. Must be sent as the exact string PING_MESSAGE (see server GameSocket.ts) */
+  PING = 'PING',
+  PONG = 'PONG',
+}
+
+/**
+ * Round-scoped actions carry the server's 1-indexed round number so that late
+ * messages from a previous round (slow image encoding, network latency) are
+ * ignored instead of ending the *next* round. Optional for backwards compat.
+ */
+export interface RoundScoped {
+  roundNumber?: number;
 }
 
 type Base64URLString = string;
@@ -101,12 +117,22 @@ export class HostChangeAction extends Action<{ newHostName: string }> {
   }
 }
 
-export class StartGameAction extends Action<{
+export interface StartGamePayload {
+  /** Set only when (re)joining a game in progress: 1-indexed current round */
   currentRound?: number;
+  /** Seconds left in the current round */
   timer?: number;
-}> {
-  constructor(currentRound?: number, timer?: number) {
-    super(ActionEnum.START_GAME, { currentRound, timer });
+  /** The rejoining player already finished the current round */
+  roundDone?: boolean;
+  /** Names of players who already finished the current round */
+  playersDone?: string[];
+  /** The intro video is still playing */
+  introPlaying?: boolean;
+}
+
+export class StartGameAction extends Action<StartGamePayload> {
+  constructor(currentRound?: number, timer?: number, extra: Omit<StartGamePayload, 'currentRound' | 'timer'> = {}) {
+    super(ActionEnum.START_GAME, { currentRound, timer, ...extra });
   }
 }
 
@@ -141,19 +167,25 @@ export class IntroEndAction extends Action<{}> {
 }
 
 // Round Actions
-export class EndRoundAction extends Action<{}> {
-  constructor() {
-    super(ActionEnum.END_ROUND, {});
+export class EndRoundAction extends Action<RoundScoped> {
+  constructor(roundNumber?: number) {
+    super(ActionEnum.END_ROUND, roundNumber === undefined ? {} : { roundNumber });
   }
 }
-export class StartRoundAction extends Action<{ timeout: number }> {
-  constructor(timeout: number) {
-    super(ActionEnum.START_ROUND, { timeout });
+export class StartRoundAction extends Action<{ timeout: number } & RoundScoped> {
+  constructor(timeout: number, roundNumber?: number) {
+    super(
+      ActionEnum.START_ROUND,
+      roundNumber === undefined ? { timeout } : { timeout, roundNumber },
+    );
   }
 }
-export class SendDrawingAction extends Action<{ image: Base64URLString }> {
-  constructor(image: Base64URLString) {
-    super(ActionEnum.SEND_DRAWING, { image });
+export class SendDrawingAction extends Action<{ image: Base64URLString } & RoundScoped> {
+  constructor(image: Base64URLString, roundNumber?: number) {
+    super(
+      ActionEnum.SEND_DRAWING,
+      roundNumber === undefined ? { image } : { image, roundNumber },
+    );
   }
 }
 export class SendEOTWAction extends Action<{ eotwId: number }> {
@@ -181,18 +213,20 @@ export class SendAllBeastsAction extends Action<{
     super(ActionEnum.SEND_ALL_BEASTS, { drawings });
   }
 }
-export class SendPresenterEndAction extends Action<{}> {
-  constructor() {
-    super(ActionEnum.PRESENTER_END, {});
+export class SendPresenterEndAction extends Action<RoundScoped> {
+  constructor(roundNumber?: number) {
+    super(ActionEnum.PRESENTER_END, roundNumber === undefined ? {} : { roundNumber });
   }
 }
-export class SendVoteAction extends Action<{
-  first: string; // player who had the best
-  second?: string; // second best (might only be 2 players)
-  third?: string; // third best (might only be 3 players)
-}> {
-  constructor(first: string, second?: string, third?: string) {
-    super(ActionEnum.SEND_VOTE, { first, second, third });
+export class SendVoteAction extends Action<
+  {
+    first: string; // player who had the best
+    second?: string; // second best (might only be 2 players)
+    third?: string; // third best (might only be 3 players)
+  } & RoundScoped
+> {
+  constructor(first: string, second?: string, third?: string, roundNumber?: number) {
+    super(ActionEnum.SEND_VOTE, { first, second, third, roundNumber });
   }
 }
 
@@ -207,6 +241,18 @@ export class SendWinnersAction extends Action<{
 }> {
   constructor(winners: { winner: string; beast: Base64URLString }[]) {
     super(ActionEnum.SEND_WINNERS, { winners });
+  }
+}
+
+export class EndGameAction extends Action<{}> {
+  constructor() {
+    super(ActionEnum.END_GAME, {});
+  }
+}
+
+export class SessionEndedAction extends Action<{ message: string }> {
+  constructor(message: string) {
+    super(ActionEnum.SESSION_ENDED, { message });
   }
 }
 
@@ -237,6 +283,8 @@ export type AnyAction =
   | SendPresenterEndAction
   | SendAllBeastsAction
   | SendWinnersAction
+  | EndGameAction
+  | SessionEndedAction
   | AnyRoundAction;
 
 // Actions object for easy import and readability
@@ -264,6 +312,8 @@ export const Actions = {
   SendBeasts: SendAllBeastsAction,
   PlayerDone: PlayerDoneAction,
   SendWinners: SendWinnersAction,
+  EndGame: EndGameAction,
+  SessionEnded: SessionEndedAction,
 };
 
 interface IWebSocket {
@@ -286,6 +336,8 @@ interface MessageEvent {
 }
 
 export class ActionTarget<T extends IWebSocket, E extends MessageEvent> {
+  /** Toggle per-message send logging (noisy; disabled in tests/simulations). */
+  static logSends = true;
   #ws: T;
   #actionListeners: Record<ActionEnum, ((this: T, ev: E) => void)[]>;
 
@@ -387,7 +439,7 @@ export class ActionTarget<T extends IWebSocket, E extends MessageEvent> {
           }),
         );
       }
-      console.log('sent:', JSON.stringify(logAction));
+      if (ActionTarget.logSends) console.log('sent:', JSON.stringify(logAction));
       this.#ws.send(msg);
     } else {
       console.error('WebSocket is not open. Ready state:', this.#ws.readyState, 'Action:', JSON.stringify(action).substring(0, 100));

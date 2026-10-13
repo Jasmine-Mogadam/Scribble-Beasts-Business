@@ -23,7 +23,12 @@ export class ServerPresentRound extends Mixin(ServerRound, PresentRound) {
   currentPresenter: Player | undefined;
   presenterTimeoutSeconds = 0;
   presenterTimer: ReturnType<typeof setTimeout> | undefined;
+  presenterStartedAt = 0;
   disconnectedPresenterWatcher: ReturnType<typeof setInterval> | undefined;
+
+  cleanup(): void {
+    this.#cleanupTimers();
+  }
 
   #cleanupTimers() {
     if (this.presenterTimer) {
@@ -55,6 +60,7 @@ export class ServerPresentRound extends Mixin(ServerRound, PresentRound) {
 
   #startPresenter(presenter: Player) {
     this.currentPresenter = presenter;
+    this.presenterStartedAt = Date.now();
     this.#broadcastPresenterChange(presenter);
     if (this.presenterTimer) {
       clearTimeout(this.presenterTimer);
@@ -136,11 +142,10 @@ export class ServerPresentRound extends Mixin(ServerRound, PresentRound) {
 
   sendReconnectState(player: Player): void {
     if (this.currentPresenter) {
+      const elapsed = (Date.now() - this.presenterStartedAt) / 1000;
+      const remaining = Math.max(0, Math.ceil(this.presenterTimeoutSeconds - elapsed));
       player.sendAction(
-        new SendPresenterChangeAction(
-          this.currentPresenter.name,
-          this.presenterTimeoutSeconds,
-        ),
+        new SendPresenterChangeAction(this.currentPresenter.name, remaining),
       );
       player.sendAction(new SendDrawingAction(this.currentPresenter.lastUploadedImage));
     }

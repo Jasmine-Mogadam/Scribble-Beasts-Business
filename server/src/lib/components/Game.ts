@@ -6,20 +6,34 @@ import {
   Actions,
   AnyAction,
   AnyRoundAction,
+  RoundScoped,
   SendDrawingAction,
 } from '../../../../shared/actions/index.js';
 import { Round, RoundEnum } from '../../../../shared/rounds/index.js';
 import { DEFAULT_ROOM_SETTINGS, type RoomSettings } from '../../../../shared/settings/index.js';
 
+/** Time between the final END_ROUND and the next START_ROUND. */
+const BETWEEN_ROUNDS_MS = 300;
+/** After the round timer expires, how long clients get to submit their work. */
+const GRACE_PERIOD_MS = 2000;
+const INTRO_SAFETY_TIMEOUT_MS = 120 * 1000;
+
 export class Game {
   #sendActionToAllPlayers: (action: AnyAction) => void;
   #backToLobby: () => void;
   #playerResolvers: Map<string, (v: boolean) => void> = new Map();
+  #timers = new Set<ReturnType<typeof setTimeout>>();
   roundsLeft: ServerRound[];
   currentRound: ServerRound | undefined;
   currentRoundNumber: number = 0;
   currentRoundTimeout: number = 0;
   roundStartTime: number = 0;
+  /** True between this round's final END_ROUND and the next START_ROUND */
+  betweenRounds = false;
+  introPlaying = false;
+  ended = false;
+  /** Player ids that finished the current round */
+  completedPlayers = new Set<string>();
   players: Player[];
   playerDrawings: Record<string, string> = {};
   settings: RoomSettings;
@@ -36,10 +50,31 @@ export class Game {
     this.roundsLeft = initializeRounds(this);
   }
 
+  /** setTimeout that is cancelled by abort(). */
+  setTimer(fn: () => void, ms: number): ReturnType<typeof setTimeout> {
+    const handle = setTimeout(() => {
+      this.#timers.delete(handle);
+      fn();
+    }, ms);
+    this.#timers.add(handle);
+    return handle;
+  }
+
+  clearTimer(handle: ReturnType<typeof setTimeout> | undefined) {
+    if (handle === undefined) return;
+    clearTimeout(handle);
+    this.#timers.delete(handle);
+  }
+
+  #sleep(ms: number): Promise<void> {
+    return new Promise((res) => this.setTimer(res, ms));
+  }
+
   async startGame() {
     if (!this.settings.skipIntro) {
       await this.playIntro();
     }
+    if (this.ended) return;
     this.nextRound();
   }
 
@@ -49,40 +84,45 @@ export class Game {
    * timeout prevents the game from hanging if the host disconnects mid-intro.
    */
   async playIntro() {
-    const INTRO_SAFETY_TIMEOUT_MS = 120 * 1000;
     console.log('[Game] Playing intro, waiting for host INTRO_END');
+    this.introPlaying = true;
     this.#sendActionToAllPlayers(new Actions.IntroStart());
 
     await new Promise<void>((resolve) => {
       let resolved = false;
+      const removers: (() => void)[] = [];
       const finish = () => {
         if (resolved) return;
         resolved = true;
-        // cleanup listeners on all players
-        this.players.forEach((p) => p.removeActionListener(ActionEnum.INTRO_END));
-        clearTimeout(safety);
+        this.introPlaying = false;
+        removers.forEach((remove) => remove());
+        this.clearTimer(safety);
         resolve();
       };
 
-      const safety = setTimeout(() => {
+      const safety = this.setTimer(() => {
         console.log('[Game] Intro safety timeout reached');
+        this.#sendActionToAllPlayers(new Actions.IntroEnd());
         finish();
       }, INTRO_SAFETY_TIMEOUT_MS);
 
-      // Accept INTRO_END from any host (host may change on disconnect)
+      // Accept INTRO_END from whoever is host at the time (host may change on disconnect)
       this.players.forEach((p) =>
-        p.addActionListener(ActionEnum.INTRO_END, () => {
-          if (!p.isHost) return;
-          console.log(`[Game] INTRO_END received from host ${p.name}`);
-          // Tell everyone the intro is over so non-host clients hide it.
-          this.#sendActionToAllPlayers(new Actions.IntroEnd());
-          finish();
-        }),
+        removers.push(
+          p.addActionListener(ActionEnum.INTRO_END, () => {
+            if (!p.isHost) return;
+            console.log(`[Game] INTRO_END received from host ${p.name}`);
+            // Tell everyone the intro is over so non-host clients hide it.
+            this.#sendActionToAllPlayers(new Actions.IntroEnd());
+            finish();
+          }),
+        ),
       );
     });
   }
 
   async nextRound() {
+    if (this.ended) return;
     this.currentRound = this.roundsLeft.shift();
     this.currentRoundNumber++;
 
@@ -101,24 +141,42 @@ export class Game {
 
     this.currentRoundTimeout = timeout;
     this.roundStartTime = Date.now();
+    this.completedPlayers = new Set();
+    this.betweenRounds = false;
 
+    // START_ROUND goes out before setup so round data (images, presenter, …)
+    // always arrives at clients that are already in the new round.
+    this.#sendActionToAllPlayers(new Actions.StartRound(timeout, this.currentRoundNumber));
     this.currentRound.setup(this.players);
-
-    this.#sendActionToAllPlayers(new Actions.StartRound(timeout));
 
     await this.waitForRoundEnd(
       this.currentRound.expectedActions,
       this.currentRound.roundResponseHandler.bind(this.currentRound),
       timeout,
     );
+    this.currentRound.cleanup();
+    if (this.ended) return;
 
-    console.log(`[Game] Round ${this.currentRoundNumber} complete. Sending post-wait EndRound. Connected: [${this.players.filter(p => !p.disconnected).map(p => p.name).join(', ')}]`);
-    this.#sendActionToAllPlayers(new Actions.EndRound());
-    // TODO: fix race condition where clients receive end round before start next round
-    await new Promise((res) => setTimeout(res, 300)); // wait .3 seconds before next round
+    this.betweenRounds = true;
+    console.log(`[Game] Round ${this.currentRoundNumber} complete. Sending post-wait EndRound. Connected: [${this.connectedNames()}]`);
+    this.#sendActionToAllPlayers(new Actions.EndRound(this.currentRoundNumber));
+    await this.#sleep(BETWEEN_ROUNDS_MS);
 
-    console.log(`[Game] Advancing to next round. Connected: [${this.players.filter(p => !p.disconnected).map(p => p.name).join(', ')}]`);
+    console.log(`[Game] Advancing to next round. Connected: [${this.connectedNames()}]`);
     this.nextRound();
+  }
+
+  connectedNames(): string {
+    return this.players
+      .filter((p) => !p.disconnected)
+      .map((p) => p.name)
+      .join(', ');
+  }
+
+  /** Round actions stamped with another round's number are stale and must be ignored. */
+  #isForCurrentRound(action: AnyRoundAction): boolean {
+    const roundNumber = (action.payload as RoundScoped | undefined)?.roundNumber;
+    return roundNumber === undefined || roundNumber === this.currentRoundNumber;
   }
 
   async waitForRoundEnd(
@@ -126,80 +184,124 @@ export class Game {
     roundHandler: (action: AnyRoundAction, player: Player) => boolean,
     timeout: number, // in seconds
   ) {
+    const removers: (() => void)[] = [];
+    const roundNumber = this.currentRoundNumber;
     const playerPromises = this.players.map(
       (p) =>
         new Promise<boolean>((res) => {
-          this.#playerResolvers.set(p.id, res);
+          const complete = () => {
+            this.completedPlayers.add(p.id);
+            this.#playerResolvers.delete(p.id);
+            res(true);
+          };
+          this.#playerResolvers.set(p.id, complete);
           // player finished early or client timeout
           expectedActions.forEach((actionType) =>
-            p.addActionListener<AnyRoundAction>(actionType, (action) => {
-              if (action.type === ActionEnum.SEND_DRAWING) {
-                this.playerDrawings[p.id] = (
-                  action as SendDrawingAction
-                ).payload.image;
-              }
-              if (roundHandler(action, p)) {
-                this.players.forEach((other) => {
-                  if (other.id !== p.id) {
-                    other.sendAction(new Actions.PlayerDone(p.name));
-                  }
-                });
-                res(true);
-              }
-            }),
+            removers.push(
+              p.addActionListener<AnyRoundAction>(actionType, (action) => {
+                if (!this.#isForCurrentRound(action)) {
+                  console.log(`[Game] Ignoring stale ${action.type} from ${p.name} (round ${(action.payload as RoundScoped).roundNumber}, current ${this.currentRoundNumber})`);
+                  return;
+                }
+                if (this.completedPlayers.has(p.id)) return;
+                if (action.type === ActionEnum.SEND_DRAWING) {
+                  this.playerDrawings[p.id] = (
+                    action as SendDrawingAction
+                  ).payload.image;
+                }
+                if (roundHandler(action, p)) {
+                  this.players.forEach((other) => {
+                    if (other.id !== p.id) {
+                      other.sendAction(new Actions.PlayerDone(p.name));
+                    }
+                  });
+                  complete();
+                }
+              }),
+            ),
           );
         }),
     );
 
-    // wait for timeout
-    const waitForTimeout = new Promise((res) =>
-      setTimeout(() => res('timeout'), timeout * 1000),
-    );
-    // wait till one of these finishes
+    let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+    const waitForTimeout = new Promise((res) => {
+      timeoutHandle = this.setTimer(() => res('timeout'), timeout * 1000);
+    });
     const winner = await Promise.race([
       Promise.all(playerPromises),
       waitForTimeout,
     ]);
+    this.clearTimer(timeoutHandle);
 
     // If timeout won, we give players a grace period to respond to our EndRound signal
-    if (winner === 'timeout') {
-      console.log(`[Game] Round ${this.currentRoundNumber} timed out. Sending EndRound to all. Connected: [${this.players.filter(p => !p.disconnected).map(p => p.name).join(', ')}]`);
-      this.#sendActionToAllPlayers(new Actions.EndRound());
+    if (winner === 'timeout' && !this.ended) {
+      console.log(`[Game] Round ${roundNumber} timed out. Sending EndRound to all. Connected: [${this.connectedNames()}]`);
+      this.#sendActionToAllPlayers(new Actions.EndRound(roundNumber));
 
-      const gracePeriod = new Promise((res) =>
-        setTimeout(() => res('grace_timeout'), 2000),
-      );
+      let graceHandle: ReturnType<typeof setTimeout> | undefined;
+      const gracePeriod = new Promise((res) => {
+        graceHandle = this.setTimer(() => res('grace_timeout'), GRACE_PERIOD_MS);
+      });
 
-      // Wait for all players to finish or grace period to end
       const graceWinner = await Promise.race([Promise.all(playerPromises), gracePeriod]);
-      console.log(`[Game] Round ${this.currentRoundNumber} grace period ended (${graceWinner === 'grace_timeout' ? 'grace timeout' : 'all responded'})`);
+      this.clearTimer(graceHandle);
+      console.log(`[Game] Round ${roundNumber} grace period ended (${graceWinner === 'grace_timeout' ? 'grace timeout' : 'all responded'})`);
     } else {
-      console.log(`[Game] Round ${this.currentRoundNumber} all players finished before timeout`);
+      console.log(`[Game] Round ${roundNumber} all players finished before timeout`);
     }
 
     this.#playerResolvers.clear();
-
-    // cleanup listeners
-    expectedActions.forEach((actionType) =>
-      this.players.forEach((p) => p.removeActionListener(actionType)),
-    );
+    removers.forEach((remove) => remove());
   }
 
   forceCompletePlayer(playerId: string): void {
-    const resolve = this.#playerResolvers.get(playerId);
-    if (resolve) {
-      resolve(true);
-      this.#playerResolvers.delete(playerId);
+    this.#playerResolvers.get(playerId)?.(true);
+  }
+
+  /** Send everything a (re)connecting player needs to resume exactly where the game is. */
+  sendReconnectState(player: Player): void {
+    if (this.introPlaying || this.currentRoundNumber === 0) {
+      player.sendAction(new Actions.StartGame());
+      if (this.introPlaying) player.sendAction(new Actions.IntroStart());
+      return;
     }
+    const playersDone = this.players
+      .filter((p) => this.completedPlayers.has(p.id))
+      .map((p) => p.name);
+    player.sendAction(
+      new Actions.StartGame(this.currentRoundNumber, this.getRemainingTime(), {
+        roundDone: this.betweenRounds || this.completedPlayers.has(player.id),
+        playersDone,
+      }),
+    );
+    const lastDrawing = this.playerDrawings[player.id];
+    if (lastDrawing) {
+      player.sendAction(new Actions.SendDrawing(lastDrawing));
+    }
+    this.currentRound?.sendReconnectState(player);
+  }
+
+  /** Stop all game timers (room destroyed). Pending awaits simply never resume. */
+  abort(): void {
+    this.ended = true;
+    this.currentRound?.cleanup();
+    this.#timers.forEach((handle) => clearTimeout(handle));
+    this.#timers.clear();
+    this.#playerResolvers.forEach((resolve) => resolve(true));
+    this.#playerResolvers.clear();
   }
 
   endGame() {
+    if (this.ended) return;
+    this.ended = true;
+    this.currentRound?.cleanup();
+    this.#playerResolvers.forEach((resolve) => resolve(true));
     this.#backToLobby();
   }
 
   getRemainingTime(): number {
-    if (!this.currentRound) return 0;
+    if (!this.currentRound || this.betweenRounds) return 0;
     const elapsed = (Date.now() - this.roundStartTime) / 1000;
-    return Math.max(0, Math.floor(this.currentRoundTimeout - elapsed));
+    return Math.max(0, Math.ceil(this.currentRoundTimeout - elapsed));
   }
 }

@@ -1,11 +1,27 @@
 import { Actions, ActionEnum, type UpdateRoomSettingsAction } from '../../../../shared/actions/index.js';
-import { DEFAULT_ROOM_SETTINGS, type RoomSettings } from '../../../../shared/settings/index.js';
+import {
+  DEFAULT_ROOM_SETTINGS,
+  normalizeRoomSettings,
+  type RoomSettings,
+} from '../../../../shared/settings/index.js';
 import { Player, Host } from './Player.js';
 import { Game } from './Game.js';
 import { handleRoomless } from '../scripts/roomless-handler.js';
 import { setHostRoomSettings } from './HostRoomSettings.js';
 
+/**
+ * Where rooms live. The Node server uses one process-wide registry; every
+ * Durable Object gets its own (DO instances can share an isolate, and socket
+ * I/O must never cross between them).
+ */
+export interface RoomContext {
+  rooms: Record<string, Room>;
+  /** When set (Durable Objects, room-scoped URLs) this connection may only create/join this room. */
+  expectedRoomName?: string;
+}
+
 export const Rooms: Record<string, Room> = Object.create(null);
+export const defaultRoomContext: RoomContext = { rooms: Rooms };
 
 export class Room {
   name: string;
@@ -13,10 +29,20 @@ export class Room {
   players: Record<string, Player> = Object.create(null);
   game: Game | null = null;
   settings: RoomSettings = { ...DEFAULT_ROOM_SETTINGS, roundTimers: {} };
+  readonly context: RoomContext;
+  #removeHostListeners: (() => void)[] = [];
+  #destroyed = false;
 
-  constructor(name: string, host: Player, initialSettings?: RoomSettings) {
+  constructor(
+    name: string,
+    host: Player,
+    initialSettings?: RoomSettings,
+    context: RoomContext = defaultRoomContext,
+  ) {
     this.name = name;
     this.host = host;
+    this.context = context;
+    host.isHost = true;
     if (initialSettings) {
       this.settings = { ...initialSettings, roundTimers: { ...initialSettings.roundTimers } };
     }
@@ -24,32 +50,26 @@ export class Room {
     this.hostSetup();
   }
 
+  /** Attach host-only listeners to the current host, removing them from any previous host. */
   hostSetup() {
-    // If host disconnects, make the next player the host (if any exist)
-    this.#attachHostCloseListener();
-    this.host.addActionListener(
-      ActionEnum.START_GAME,
-      this.startGame.bind(this),
-    );
-    this.host.addActionListener<UpdateRoomSettingsAction>(
-      ActionEnum.UPDATE_ROOM_SETTINGS,
-      this.updateSettings.bind(this),
-    );
-  }
-
-  #attachHostCloseListener() {
-    this.host.addEventListener('close', () => {
-      this.ensureConnectedHost();
-    });
-  }
-
-  reattachHostCloseListener() {
-    this.#attachHostCloseListener();
+    this.#removeHostListeners.forEach((remove) => remove());
+    const host = this.host;
+    this.#removeHostListeners = [
+      host.addActionListener(ActionEnum.START_GAME, () => {
+        if (host === this.host) this.startGame();
+      }),
+      host.addActionListener<UpdateRoomSettingsAction>(
+        ActionEnum.UPDATE_ROOM_SETTINGS,
+        (action) => {
+          if (host === this.host) this.updateSettings(action);
+        },
+      ),
+    ];
   }
 
   /** Ensures room.host always points to a currently connected player when one exists. */
   ensureConnectedHost(): void {
-    if (!this.host.disconnected) return;
+    if (!this.host.disconnected && this.players[this.host.name] === this.host) return;
 
     const connectedPlayers = this.getConnectedPlayers();
     if (connectedPlayers.length === 0) return;
@@ -67,22 +87,36 @@ export class Room {
   }
 
   updateSettings(action: UpdateRoomSettingsAction): void {
-    this.settings = action.payload.settings;
+    // Never trust client-provided shapes: normalize before storing/broadcasting.
+    this.settings = normalizeRoomSettings(action.payload?.settings);
     setHostRoomSettings(this.host.name, this.settings);
     console.log(`Room ${this.name} settings updated:`, this.settings);
     this.sendActionToAll(new Actions.RoomSettingsChange(this.settings));
   }
 
+  get destroyed(): boolean {
+    return this.#destroyed;
+  }
+
   destroy() {
+    if (this.#destroyed) return;
+    this.#destroyed = true;
+    this.game?.abort();
+    this.game = null;
     Object.values(this.players).forEach((player) => player.destroy());
-    this.players = {};
-    delete Rooms[this.name];
+    this.players = Object.create(null);
+    if (this.context.rooms[this.name] === this) {
+      delete this.context.rooms[this.name];
+    }
   }
 
   addPlayer(player: Player): void {
     this.players[player.name] = player;
-    player.addEventListener('close', () => {
-      this.deactivatePlayer(player.name);
+    player.onClose(() => {
+      // Ignore close events from players that already left/were replaced
+      if (this.players[player.name] === player) {
+        this.deactivatePlayer(player.name);
+      }
     });
     player.addActionListener(ActionEnum.LEAVE_ROOM, () => {
       this.removePlayer(player.name);
@@ -124,6 +158,7 @@ export class Room {
       if (playerToRemove.isHost) {
         setHostRoomSettings(playerToRemove.name, this.settings);
       }
+      delete this.players[playerName];
       if (this.game) {
         this.game.forceCompletePlayer(playerToRemove.id);
       }
@@ -133,10 +168,11 @@ export class Room {
       } else {
         // Voluntary leave — WS is alive, return it to roomless state
         console.log(`Player ${playerName} left room ${this.name}.`);
-        playerToRemove.getWebSocket().removeAllListeners();
-        handleRoomless(playerToRemove.getWebSocket());
+        playerToRemove.clearDisconnectTimeout();
+        const ws = playerToRemove.getWebSocket();
+        ws.removeAllListeners();
+        handleRoomless(ws, this.context);
       }
-      delete this.players[playerName];
       this.ensureConnectedHost();
       this.playerListChanged();
     }
@@ -174,19 +210,33 @@ export class Room {
   }
 
   startGame(): void {
+    if (this.game) {
+      console.log(`Game already running in room ${this.name}; ignoring START_GAME.`);
+      return;
+    }
     if (this.getConnectedPlayers().length < 2) {
       console.log('Not enough players to start game.');
       return;
     }
     this.getConnectedPlayers().forEach((p) => (p.score = 0));
     this.sendActionToAll(new Actions.StartGame());
-    this.game = new Game(
+    const game = new Game(
       this.getConnectedPlayers(),
       this.sendActionToAll.bind(this),
-      () => {},
+      () => this.returnToLobby(game),
       this.settings,
     );
+    this.game = game;
     this.game.startGame();
+  }
+
+  /** Called by Game when it finishes. Unlocks the room so a new game can be started / joined. */
+  returnToLobby(game: Game): void {
+    if (this.game !== game) return;
+    this.game = null;
+    console.log(`Game in room ${this.name} ended; returning to lobby.`);
+    this.sendActionToAll(new Actions.EndGame());
+    this.playerListChanged();
   }
 
   getConnectedPlayers(): Player[] {
@@ -195,5 +245,9 @@ export class Room {
 
   findPlayerById(playerId: string): Player | undefined {
     return Object.values(this.players).find((p) => p.id === playerId);
+  }
+
+  findPlayerByName(playerName: string): Player | undefined {
+    return this.players[playerName];
   }
 }

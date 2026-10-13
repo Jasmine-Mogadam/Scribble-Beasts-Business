@@ -61,7 +61,8 @@ export class ServerWinnersRound extends Mixin(
   winners: { winner: string; beast: string }[] = [];
   setup(players: Player[]): void {
     this.winners = [];
-    const top3 = players.sort((a, b) => b.score - a.score).slice(0, 3);
+    // slice: never reorder the game's shared player list
+    const top3 = players.slice().sort((a, b) => b.score - a.score).slice(0, 3);
     top3.forEach((p) => {
       this.winners.push({ winner: p.name, beast: p.lastUploadedImage });
     });
