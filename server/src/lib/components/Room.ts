@@ -172,6 +172,9 @@ export class Room {
         const ws = playerToRemove.getWebSocket();
         ws.removeAllListeners();
         handleRoomless(ws, this.context);
+        // The running game still holds this Player; treat them as gone so it
+        // stops messaging a socket that now belongs to the roomless handler.
+        playerToRemove.disconnected = true;
       }
       this.ensureConnectedHost();
       this.playerListChanged();

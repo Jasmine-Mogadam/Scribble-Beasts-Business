@@ -90,7 +90,17 @@ class CWebsocket extends ActionTarget<WebSocket, MessageEvent<string>> {
       // Phones suspend background tabs; reconnect as soon as we're visible/online.
       window.addEventListener('online', () => this.#reconnectNowIfDown());
       document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') this.#reconnectNowIfDown();
+        if (document.visibilityState !== 'visible') return;
+        // A suspended tab may hold a half-open socket that still looks OPEN.
+        // If we haven't heard from the server for a while, replace it now
+        // rather than waiting for the heartbeat to notice.
+        const stale =
+          Date.now() - this.#lastMessageAt > HEARTBEAT_INTERVAL_MS + 5_000;
+        if (this.#roomName && this.#ws.readyState === WebSocket.OPEN && stale) {
+          this.#open('reconnecting');
+        } else {
+          this.#reconnectNowIfDown();
+        }
       });
     }
   }
