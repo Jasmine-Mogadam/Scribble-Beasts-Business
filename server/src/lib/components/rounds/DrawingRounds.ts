@@ -41,6 +41,13 @@ export abstract class ServerDrawingRound extends ServerRound {
     return false;
   }
 
+  /** Unfinished work becomes both their resume point and their entry if they never come back. */
+  autosave(image: string, player: Player): void {
+    if (typeof image === 'string' && image.startsWith('data:image/')) {
+      player.lastUploadedImage = image;
+    }
+  }
+
   /** On reconnect, send the player the starting image for this round. */
   sendReconnectState(player: Player): void {
     player.sendAction(new SendDrawingAction(player.lastUploadedImage));

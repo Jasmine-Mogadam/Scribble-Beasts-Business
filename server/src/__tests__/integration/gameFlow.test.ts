@@ -117,6 +117,25 @@ describe('reconnect / refresh', () => {
     expect(host.received(ActionEnum.PLAYER_DONE)).toHaveLength(1);
   });
 
+  it('an unload autosave keeps the drawing without marking the player done', async () => {
+    bots = await createLobby(baseUrl, nextRoom(), 2, { autoPlay: false }, {
+      ...FAST_SETTINGS,
+      roundTimers: { ...FAST_SETTINGS.roundTimers, [RoundEnum.SCRIBBLE]: 30 },
+    });
+    const [host, p1] = bots;
+    host.send(ActionEnum.START_GAME);
+    await p1.waitForType(ActionEnum.START_ROUND);
+    const wip = 'data:image/png;base64,V0lQ';
+    p1.send(ActionEnum.SEND_DRAWING, { image: wip, roundNumber: 1, autosave: true });
+    await p1.refresh();
+    const start = await p1.waitFor((m) => m.type === ActionEnum.START_GAME && !!m.payload.currentRound, 5000, true);
+    expect(start.payload.roundDone).toBe(false);
+    await sleep(100);
+    const drawings = p1.received(ActionEnum.SEND_DRAWING);
+    expect(drawings[drawings.length - 1].payload.image).toBe(wip);
+    expect(host.received(ActionEnum.PLAYER_DONE)).toHaveLength(0);
+  });
+
   it('a player who refreshes keeps playing through to the end of the game', async () => {
     bots = await createLobby(baseUrl, nextRoom(), 3);
     const [host, p1] = bots;

@@ -103,7 +103,7 @@ export class Player extends ActionTarget<GameSocket, { data: any }> {
     console.log(`[Player] ${this.name} reconnect: sending JoinRoom, game=${!!room.game}`);
 
     // Always restore identity so client stores (playerName, roomName) are set
-    this.sendAction(new Actions.JoinRoom(room.name, this.name, room.host.name));
+    this.sendAction(new Actions.JoinRoom(room.name, this.name, room.host.name, !!room.game));
     this.sendAction(new Actions.RoomSettingsChange(room.settings));
 
     room.game?.sendReconnectState(this);

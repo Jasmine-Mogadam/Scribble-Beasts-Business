@@ -84,9 +84,11 @@ export class JoinRoomAction extends Action<{
   roomName: string;
   playerName: string;
   hostName?: string; // Used only on server reply (because I'm lazy)
+  /** Server reply only: a game is in progress and START_GAME state follows */
+  inGame?: boolean;
 }> {
-  constructor(roomName: string, playerName: string, hostName?: string) {
-    super(ActionEnum.JOIN_ROOM, { roomName, playerName, hostName });
+  constructor(roomName: string, playerName: string, hostName?: string, inGame?: boolean) {
+    super(ActionEnum.JOIN_ROOM, { roomName, playerName, hostName, inGame });
   }
 }
 
@@ -180,12 +182,19 @@ export class StartRoundAction extends Action<{ timeout: number } & RoundScoped> 
     );
   }
 }
-export class SendDrawingAction extends Action<{ image: Base64URLString } & RoundScoped> {
-  constructor(image: Base64URLString, roundNumber?: number) {
-    super(
-      ActionEnum.SEND_DRAWING,
-      roundNumber === undefined ? { image } : { image, roundNumber },
-    );
+export class SendDrawingAction extends Action<
+  {
+    image: Base64URLString;
+    /** Client → server: a save on page unload, not a "done" submission */
+    autosave?: boolean;
+  } & RoundScoped
+> {
+  constructor(image: Base64URLString, roundNumber?: number, autosave?: boolean) {
+    super(ActionEnum.SEND_DRAWING, {
+      image,
+      ...(roundNumber === undefined ? {} : { roundNumber }),
+      ...(autosave ? { autosave } : {}),
+    });
   }
 }
 export class SendEOTWAction extends Action<{ eotwId: number }> {

@@ -204,6 +204,14 @@ export class Game {
                   return;
                 }
                 if (this.completedPlayers.has(p.id)) return;
+                if (
+                  action.type === ActionEnum.SEND_DRAWING &&
+                  (action as SendDrawingAction).payload.autosave
+                ) {
+                  // Tab closing/refreshing: keep their work, don't mark them done
+                  this.currentRound?.autosave((action as SendDrawingAction).payload.image, p);
+                  return;
+                }
                 if (action.type === ActionEnum.SEND_DRAWING) {
                   this.playerDrawings[p.id] = (
                     action as SendDrawingAction

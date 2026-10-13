@@ -12,11 +12,13 @@ import {
   type SendAllBeastsAction,
   type SendWinnersAction,
   type RoomSettingsChangeAction,
+  type SessionEndedAction,
 } from '@shared/actions';
 import { derived, get, writable } from 'svelte/store';
 import ClientWebsocket from './ClientWebsocket';
-import { View, navigateTo } from './Navigator';
-import { jumpToRound, resetRoundStore } from './stores/roundStore';
+import { View, navigateTo, currentView } from './Navigator';
+import { jumpToRound, resetRoundStore, startNextRound } from './stores/roundStore';
+import { introPlaying } from './stores/introStore';
 import { getEotwCardFromId, type EotwCard } from '@shared/eotw';
 import { roomSettings } from './stores/roomSettingsStore';
 
@@ -51,6 +53,18 @@ export const allBeasts = writable<{ playerName: string; drawing: string }[]>(
 export const winners = writable<{ winner: string; beast: Base64URLString }[]>(
   [],
 );
+/** User-facing notice (session ended, opened in another tab, …). */
+export const notice = writable<string>('');
+
+function resetGameStores() {
+  resetRoundStore();
+  playersDone.set([]);
+  winners.set([]);
+  eotwCard.set(undefined as any);
+  presenterName.set(undefined);
+  presenterTimeLeft.set(undefined);
+  introPlaying.set(false);
+}
 
 const joinRoom = (action: JoinRoomAction) => {
   const {
@@ -62,7 +76,13 @@ const joinRoom = (action: JoinRoomAction) => {
   playerName.set(playerNameValue);
   hostName.set(hostNameValue);
   isHost.set(hostNameValue === playerNameValue);
-  navigateTo(View.LOBBY);
+  notice.set('');
+  // On a mid-game reconnect the server follows up with START_GAME; don't bounce
+  // through the lobby (that would unmount the round and wipe the canvas).
+  if (!action.payload.inGame) {
+    if (get(currentView) === View.GAME) resetGameStores();
+    navigateTo(View.LOBBY);
+  }
 };
 
 const playerChange = (action: PlayerListChangeAction) => {
@@ -77,20 +97,38 @@ const hostChange = (action: HostChangeAction) => {
 };
 
 const startGame = (action: StartGameAction) => {
-  const { currentRound, timer } = action.payload;
+  const { currentRound, timer, roundDone, playersDone: done } = action.payload;
   if (currentRound) {
     // reconnecting mid-game: fast-forward to the correct round
-    jumpToRound(currentRound - 1, timer || 0);
+    introPlaying.set(false);
+    jumpToRound(currentRound - 1, timer || 0, !!roundDone);
+    playersDone.set(done ?? []);
   } else {
-    // fresh game start: reset all stale state from previous game
-    resetRoundStore();
-    playersDone.set([]);
-    winners.set([]);
-    eotwCard.set(undefined as any);
-    presenterName.set(undefined);
-    presenterTimeLeft.set(undefined);
+    // fresh game start (or rejoining during the intro): reset stale state
+    resetGameStores();
   }
   navigateTo(View.GAME);
+};
+
+const startRound = (action: StartRoundAction) => {
+  // First START_ROUND implicitly ends any intro that was still on screen.
+  introPlaying.set(false);
+  playersDone.set([]);
+  startNextRound(action.payload.timeout, action.payload.roundNumber);
+};
+
+const endGame = () => {
+  resetGameStores();
+  navigateTo(View.LOBBY);
+};
+
+const sessionEnded = (action: SessionEndedAction) => {
+  ClientWebsocket.clearSession();
+  if (get(currentView) !== View.ROOM_FORM) {
+    resetGameStores();
+    navigateTo(View.ROOM_FORM);
+    notice.set(action.payload.message);
+  }
 };
 
 const drawingImageChange = (action: SendDrawingAction) => {
@@ -110,11 +148,9 @@ const eotwChange = (action: SendEotwAction) => {
 
 const playerDone = (action: PlayerDoneAction) => {
   const { playerName } = action.payload;
-  playersDone.update((done) => [...done, playerName]);
-};
-
-const resetPlayersDone = (_action: StartRoundAction) => {
-  playersDone.set([]);
+  playersDone.update((done) =>
+    done.includes(playerName) ? done : [...done, playerName],
+  );
 };
 
 const loadBeasts = (action: SendAllBeastsAction) => {
@@ -151,6 +187,10 @@ export function resetState() {
   ClientWebsocket.removeActionListener(ActionEnum.SEND_ALL_BEASTS);
   ClientWebsocket.removeActionListener(ActionEnum.SEND_WINNERS);
   ClientWebsocket.removeActionListener(ActionEnum.ROOM_SETTINGS_CHANGE);
+  ClientWebsocket.removeActionListener(ActionEnum.INTRO_START);
+  ClientWebsocket.removeActionListener(ActionEnum.INTRO_END);
+  ClientWebsocket.removeActionListener(ActionEnum.END_GAME);
+  ClientWebsocket.removeActionListener(ActionEnum.SESSION_ENDED);
 
   ClientWebsocket.addActionListener<JoinRoomAction>(
     ActionEnum.JOIN_ROOM,
@@ -186,7 +226,18 @@ export function resetState() {
   );
   ClientWebsocket.addActionListener<StartRoundAction>(
     ActionEnum.START_ROUND,
-    resetPlayersDone,
+    startRound,
+  );
+  ClientWebsocket.addActionListener(ActionEnum.INTRO_START, () =>
+    introPlaying.set(true),
+  );
+  ClientWebsocket.addActionListener(ActionEnum.INTRO_END, () =>
+    introPlaying.set(false),
+  );
+  ClientWebsocket.addActionListener(ActionEnum.END_GAME, endGame);
+  ClientWebsocket.addActionListener<SessionEndedAction>(
+    ActionEnum.SESSION_ENDED,
+    sessionEnded,
   );
   ClientWebsocket.addActionListener<SendAllBeastsAction>(
     ActionEnum.SEND_ALL_BEASTS,

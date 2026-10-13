@@ -13,6 +13,8 @@
   import { personalSettings } from './lib/stores/personalSettingsStore';
 
   resetState();
+  // After a refresh, rejoin the room this tab was in (server restores our seat)
+  ClientWebsocket.resumeSession();
 
   let showLeaveConfirm = $state(false);
   let showPersonalSettings = $state(false);
@@ -25,6 +27,7 @@
 
   function leaveRoom() {
     ClientWebsocket.sendAction(new Actions.LeaveRoom());
+    ClientWebsocket.disconnect();
     navigateTo(View.ROOM_FORM);
   }
 

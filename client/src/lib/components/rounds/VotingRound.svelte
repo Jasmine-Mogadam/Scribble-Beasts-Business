@@ -4,7 +4,7 @@
   import Round from '../Round.svelte';
   import ClientWebsocket from '../../ClientWebsocket';
   import { ActionEnum } from '@shared/actions';
-  import { roundStore } from '../../stores/roundStore';
+  import { roundStore, currentServerRound } from '../../stores/roundStore';
   import { roomSettings } from '../../stores/roomSettingsStore';
   import { onMount } from 'svelte';
 
@@ -34,6 +34,7 @@
   // Local picks array of indices into votableBeasts in selection order
   let picks: number[] = $state([]);
   let submitted = $state(false);
+  const myRound = currentServerRound();
 
   const ordinals = ['', 'second', 'third'];
 
@@ -80,6 +81,7 @@
         first: votableBeasts[picks[0]]?.playerName ?? '',
         second: votableBeasts[picks[1]]?.playerName ?? '',
         third: votableBeasts[picks[2]]?.playerName ?? '',
+        roundNumber: myRound,
       },
     });
     roundStore.update((state) => ({

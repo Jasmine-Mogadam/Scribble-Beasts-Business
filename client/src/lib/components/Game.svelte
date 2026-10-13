@@ -1,20 +1,12 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import {
-    endCurrentRound,
-    roundStore,
-    startNextRound,
-  } from '../stores/roundStore';
-  import { ActionEnum } from '@shared/actions';
-  import ClientWebsocket from '../ClientWebsocket';
+  import { endCurrentRound, roundStore } from '../stores/roundStore';
   import { ROUND_TYPE_COMPONENT_DICT } from '../constants/RoundTypeComponentDict';
   import Intro from './Intro.svelte';
   import { introPlaying } from '../stores/introStore';
   import { isHost } from '../GameState';
   import { roomSettings } from '../stores/roomSettingsStore';
   import { personalSettings } from '../stores/personalSettingsStore';
-
-  import type { StartRoundAction } from '@shared/actions';
 
   const CROSSFADE_MS = 1000;
 
@@ -249,63 +241,9 @@
   });
 
   onMount(() => {
-    console.log(
-      '[Game.svelte] mounted, adding END_ROUND + START_ROUND listeners',
-    );
-
-    const handleServerEndRound = () => {
-      console.log('[Game.svelte] END_ROUND received, calling endCurrentRound');
-      endCurrentRound();
-    };
-
-    const handleServerStartRound = (action: StartRoundAction) => {
-      console.log(
-        '[Game.svelte] START_ROUND received, timeout:',
-        action.payload.timeout,
-      );
-      // First START_ROUND implicitly ends any intro that was still on screen.
-      introPlaying.set(false);
-      startNextRound(action.payload.timeout);
-    };
-
-    const handleIntroStart = () => {
-      console.log('[Game.svelte] INTRO_START received');
-      introPlaying.set(true);
-    };
-
-    const handleIntroEnd = () => {
-      console.log('[Game.svelte] INTRO_END received');
-      introPlaying.set(false);
-    };
-
-    const removeEndRoundListener = ClientWebsocket.addActionListener(
-      ActionEnum.END_ROUND,
-      handleServerEndRound,
-    );
-
-    const removeStartRoundListener = ClientWebsocket.addActionListener(
-      ActionEnum.START_ROUND,
-      handleServerStartRound,
-    );
-
-    const removeIntroStartListener = ClientWebsocket.addActionListener(
-      ActionEnum.INTRO_START,
-      handleIntroStart,
-    );
-
-    const removeIntroEndListener = ClientWebsocket.addActionListener(
-      ActionEnum.INTRO_END,
-      handleIntroEnd,
-    );
-
+    // Round/intro transitions are driven by global listeners in GameState.ts so
+    // they never depend on this component's mount timing (e.g. after reconnect).
     return () => {
-      console.log(
-        '[Game.svelte] unmounting, removing END_ROUND + START_ROUND listeners',
-      );
-      removeEndRoundListener();
-      removeStartRoundListener();
-      removeIntroStartListener();
-      removeIntroEndListener();
       if (pendingAudio) {
         pendingAudio.src = '';
         pendingAudio = null;

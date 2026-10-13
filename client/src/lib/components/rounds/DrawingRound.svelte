@@ -1,9 +1,17 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { drawingImage } from '../../GameState';
-  import { SendDrawingAction, ActionEnum } from '@shared/actions';
+  import {
+    SendDrawingAction,
+    ActionEnum,
+    type EndRoundAction,
+  } from '@shared/actions';
   import ClientWebsocket from '../../ClientWebsocket';
-  import { roundStore, endCurrentRound } from '../../stores/roundStore';
+  import {
+    roundStore,
+    endCurrentRound,
+    currentServerRound,
+  } from '../../stores/roundStore';
   import { LayerMode } from '../../types/LayerMode';
   import type { PenParams } from '../../types/PenParams';
   import Round from '../Round.svelte';
@@ -20,6 +28,43 @@
   } = $props();
 
   let submitted = $state(false);
+  // Server round this canvas belongs to (stamped on submissions so a slow
+  // submit can't be counted toward the next round).
+  const myRound = currentServerRound();
+
+  function sendDrawing(imageData: string) {
+    drawingImage.set(imageData);
+    ClientWebsocket.sendAction(new SendDrawingAction(imageData, myRound));
+  }
+
+  /**
+   * Synchronous best-effort save when the tab is closing/refreshing. Uses the
+   * already-rendered layer canvases (no async image loads, which never finish
+   * during unload). The server keeps it as this player's work but does not mark
+   * them done, so after a refresh they continue drawing from here.
+   */
+  function autosave() {
+    if (submitted || !canvas) return;
+    try {
+      const out = document.createElement('canvas');
+      out.width = canvas.width;
+      out.height = canvas.height;
+      const ctx = out.getContext('2d');
+      if (!ctx) return;
+      if (layerMode === LayerMode.FrontLayer && backgroundCanvas) {
+        ctx.drawImage(backgroundCanvas, 0, 0, 520, 520);
+      }
+      ctx.drawImage(canvas, 0, 0);
+      if (layerMode === LayerMode.BehindLayer && overlayCanvas) {
+        ctx.drawImage(overlayCanvas, 0, 0, 520, 520);
+      }
+      ClientWebsocket.sendAction(
+        new SendDrawingAction(out.toDataURL(), myRound, true),
+      );
+    } catch (err) {
+      console.error('autosave failed', err);
+    }
+  }
   let canvas = $state<HTMLCanvasElement>();
   let overlayCanvas = $state<HTMLCanvasElement>();
   let backgroundCanvas = $state<HTMLCanvasElement>();
@@ -282,16 +327,12 @@
           // Reset composite operation
           context.globalCompositeOperation = 'source-over';
 
-          const imageData = canvasRef.toDataURL();
-          drawingImage.set(imageData);
-          ClientWebsocket.sendAction(new SendDrawingAction(imageData));
+          sendDrawing(canvasRef.toDataURL());
           resolve();
         };
         bgImage.onerror = () => {
           // If image fails to load, send what we have
-          const imageData = canvasRef.toDataURL();
-          drawingImage.set(imageData);
-          ClientWebsocket.sendAction(new SendDrawingAction(imageData));
+          sendDrawing(canvasRef.toDataURL());
           resolve();
         };
         bgImage.src = $drawingImage;
@@ -306,25 +347,19 @@
             return;
           }
           context.drawImage(overlayImage, 0, 0, 520, 520);
-          const imageData = canvasRef.toDataURL();
-          drawingImage.set(imageData);
-          ClientWebsocket.sendAction(new SendDrawingAction(imageData));
+          sendDrawing(canvasRef.toDataURL());
           resolve();
         };
         overlayImage.onerror = () => {
           // If image fails to load, send what we have
-          const imageData = canvasRef.toDataURL();
-          drawingImage.set(imageData);
-          ClientWebsocket.sendAction(new SendDrawingAction(imageData));
+          sendDrawing(canvasRef.toDataURL());
           resolve();
         };
         overlayImage.src = $drawingImage;
       });
     } else {
       // Fallback: just send the canvas as-is
-      const imageData = canvasRef.toDataURL();
-      drawingImage.set(imageData);
-      ClientWebsocket.sendAction(new SendDrawingAction(imageData));
+      sendDrawing(canvasRef.toDataURL());
     }
   }
 
@@ -357,21 +392,22 @@
       history = [initial];
     }
 
-    window.addEventListener('beforeunload', handleRoundEnd);
+    window.addEventListener('beforeunload', autosave);
 
     const removeServerEndRoundListener = ClientWebsocket.addActionListener(
       ActionEnum.END_ROUND,
-      async () => {
+      async (action: EndRoundAction) => {
+        const round = action.payload.roundNumber;
+        if (round !== undefined && round !== myRound) return;
         await handleRoundEnd();
       },
     );
 
+    // Submit slightly before the timer hits zero so the drawing beats END_ROUND
     const timerId = setTimeout(async () => {
       await handleRoundEnd();
-      if ($roundStore.ongoing) {
-        endCurrentRound();
-      }
-    }, $roundStore.timeLeft * 1000 - 250);
+      endCurrentRound(undefined, myRound);
+    }, Math.max(0, $roundStore.timeLeft * 1000 - 250));
 
     if (!canvas) return;
 
@@ -384,7 +420,7 @@
 
     return () => {
       removeServerEndRoundListener();
-      window.removeEventListener('beforeunload', handleRoundEnd);
+      window.removeEventListener('beforeunload', autosave);
       clearTimeout(timerId);
       if (!canvas) return;
       canvas.removeEventListener('mousedown', handleMouseDown);

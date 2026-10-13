@@ -83,7 +83,14 @@
     const safePlayerName = normalizePlayerName(playerName);
     roomName = safeRoomName;
     playerName = safePlayerName;
+    if (!safeRoomName || !safePlayerName) {
+      roomNameError = safeRoomName ? '' : 'Room name cannot be empty.';
+      playerNameError = safePlayerName ? '' : 'Name cannot be empty.';
+      return;
+    }
     const joinRoomAction = new Actions.JoinRoom(safeRoomName, safePlayerName);
+    // Each room has its own server instance; connect to it, then ask to join.
+    ClientWebsocket.connect(safeRoomName);
     ClientWebsocket.sendAction(joinRoomAction);
   }
   function createRoom(event: Event): void {
@@ -92,11 +99,17 @@
     const safePlayerName = normalizePlayerName(playerName);
     roomName = safeRoomName;
     playerName = safePlayerName;
+    if (!safeRoomName || !safePlayerName) {
+      roomNameError = safeRoomName ? '' : 'Room name cannot be empty.';
+      playerNameError = safePlayerName ? '' : 'Name cannot be empty.';
+      return;
+    }
     const createRoomAction = new Actions.CreateRoom(
       safeRoomName,
       safePlayerName,
       $roomSettings,
     );
+    ClientWebsocket.connect(safeRoomName);
     ClientWebsocket.sendAction(createRoomAction);
   }
 

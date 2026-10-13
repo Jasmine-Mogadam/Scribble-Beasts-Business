@@ -9,6 +9,9 @@
   import ClientWebsocket from '../../ClientWebsocket';
   import { ActionEnum } from '@shared/actions';
   import { onMount } from 'svelte';
+  import { currentServerRound } from '../../stores/roundStore';
+
+  const myRound = currentServerRound();
 
   async function handleRoundEnd() {
     // base function will already send end round action for us
@@ -18,7 +21,7 @@
     // send presenter end action
     ClientWebsocket.sendAction({
       type: ActionEnum.PRESENTER_END,
-      payload: {},
+      payload: { roundNumber: myRound },
     });
   }
 

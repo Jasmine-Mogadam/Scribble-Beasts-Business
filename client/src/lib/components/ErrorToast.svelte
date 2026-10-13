@@ -1,32 +1,45 @@
 <script lang="ts">
-  import ClientWebsocket from '../ClientWebsocket';
-  let message: string = $state('');
-  let showMessage: boolean = $state(false);
+  import { connectionStatus } from '../ClientWebsocket';
+  import { notice } from '../GameState';
 
-  if (process.env.NODE_ENV === 'development') {
-    ClientWebsocket.addEventListener('error', (event) => {
-      message +=
-        'Error! Send in a bug report!\n' + JSON.stringify(event) + '\n';
-      showMessage = true;
-    });
+  // Only complain about reconnects that take a moment; brief blips are silent.
+  const SHOW_RECONNECTING_AFTER_MS = 1500;
+  let reconnectingVisible = $state(false);
+  let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 
-    ClientWebsocket.addEventListener('close', (event) => {
-      message +=
-        "Can't connect to server, try refreshing the page (server might be down)." +
-        '\n';
-      showMessage = true;
-    });
-  }
+  $effect(() => {
+    const status = $connectionStatus;
+    clearTimeout(reconnectTimer);
+    if (status === 'reconnecting') {
+      reconnectTimer = setTimeout(() => (reconnectingVisible = true), SHOW_RECONNECTING_AFTER_MS);
+    } else {
+      reconnectingVisible = false;
+    }
+    return () => clearTimeout(reconnectTimer);
+  });
+
+  const message = $derived(
+    $connectionStatus === 'replaced'
+      ? 'You opened this game in another tab, so this tab was disconnected. Refresh to play here instead.'
+      : reconnectingVisible
+        ? 'Connection lost. Reconnecting…'
+        : $notice,
+  );
 </script>
 
 <div>
   <div>
     <div
       class="toast-error"
-      class:toast-hidden={!showMessage}
-      class:toast-visible={showMessage}
+      class:toast-hidden={!message}
+      class:toast-visible={!!message}
+      role="status"
+      aria-live="polite"
     >
       <pre class="toast-content">{message}</pre>
+      {#if $notice && message === $notice}
+        <button class="toast-close" onclick={() => notice.set('')} aria-label="Dismiss">✕</button>
+      {/if}
     </div>
   </div>
 </div>
@@ -55,6 +68,23 @@
   .toast-visible {
     opacity: 1;
     transform: translateX(-50%) translateY(0);
+  }
+
+  .toast-hidden {
+    pointer-events: none;
+  }
+
+  .toast-close {
+    background: none;
+    border: none;
+    color: white;
+    margin-left: 0.75rem;
+    cursor: pointer;
+  }
+
+  .toast-error {
+    display: flex;
+    align-items: flex-start;
   }
 
   .toast-content {
