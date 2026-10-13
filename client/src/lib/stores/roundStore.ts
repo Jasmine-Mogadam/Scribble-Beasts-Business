@@ -34,10 +34,17 @@ let endedRound = -1;
  * @param roundNumber the server round this end belongs to; if the client has
  *   already moved past it (slow async submit), nothing happens.
  */
-export function endCurrentRound(action?: AnyRoundAction, roundNumber = currentServerRound()) {
+export function endCurrentRound(
+  action?: AnyRoundAction,
+  roundNumber = currentServerRound(),
+) {
   const state = get(roundStore);
   if (roundNumber !== state.number + 1) {
-    console.log(`[roundStore] ignoring endCurrentRound for stale round ${roundNumber} (now ${state.number + 1})`);
+    console.log(
+      `[roundStore] ignoring endCurrentRound for stale round ${roundNumber} (now ${
+        state.number + 1
+      })`,
+    );
     return;
   }
   console.log(
@@ -56,7 +63,10 @@ export function endCurrentRound(action?: AnyRoundAction, roundNumber = currentSe
 }
 
 /** Attach the server round number to a round-scoped action. */
-export function stampRound<T extends { payload: object }>(action: T, roundNumber = currentServerRound()): T {
+export function stampRound<T extends { payload: object }>(
+  action: T,
+  roundNumber = currentServerRound(),
+): T {
   return { ...action, payload: { ...action.payload, roundNumber } };
 }
 
@@ -67,7 +77,9 @@ export function stampRound<T extends { payload: object }>(action: T, roundNumber
 export function startNextRound(timeout: number, roundNumber?: number) {
   const prev = get(roundStore);
   const index = roundNumber !== undefined ? roundNumber - 1 : prev.number + 1;
-  console.log(`[roundStore] startNextRound. prev=${prev.number}, now=${index}, timeout=${timeout}`);
+  console.log(
+    `[roundStore] startNextRound. prev=${prev.number}, now=${index}, timeout=${timeout}`,
+  );
   roundStore.set({
     ongoing: true,
     number: index,
@@ -89,8 +101,14 @@ export function resetRoundStore() {
 }
 
 /** Rejoin a round in progress (reconnect / refresh). */
-export function jumpToRound(roundNumber: number, timeout: number, done = false) {
-  console.log(`[roundStore] jumpToRound called. roundNumber=${roundNumber}, timeout=${timeout}, done=${done}`);
+export function jumpToRound(
+  roundNumber: number,
+  timeout: number,
+  done = false,
+) {
+  console.log(
+    `[roundStore] jumpToRound called. roundNumber=${roundNumber}, timeout=${timeout}, done=${done}`,
+  );
   roundStore.update((state) => {
     let current = Rounds[roundNumber];
     let actualRoundNumber = roundNumber;
@@ -106,7 +124,7 @@ export function jumpToRound(roundNumber: number, timeout: number, done = false) 
         actualRoundNumber = Rounds.length - 1;
       }
       console.log(
-        `Round ${roundNumber} is out of bounds. Jumping to round ${actualRoundNumber}.`
+        `Round ${roundNumber} is out of bounds. Jumping to round ${actualRoundNumber}.`,
       );
     }
 

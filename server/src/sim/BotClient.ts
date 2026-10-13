@@ -49,7 +49,9 @@ export class BotClient {
 
   get url(): string {
     const base = this.opts.baseUrl.replace(/\/$/, '');
-    const q = this.playerId ? `?playerId=${encodeURIComponent(this.playerId)}` : '';
+    const q = this.playerId
+      ? `?playerId=${encodeURIComponent(this.playerId)}`
+      : '';
     return `${base}/api/room/${encodeURIComponent(this.opts.room)}${q}`;
   }
 
@@ -118,10 +120,25 @@ export class BotClient {
       if (found) return Promise.resolve(found);
     }
     return new Promise((resolve, reject) => {
-      const waiter = { pred, resolve: (m: Msg) => { clearTimeout(t); resolve(m); } };
+      const waiter = {
+        pred,
+        resolve: (m: Msg) => {
+          clearTimeout(t);
+          resolve(m);
+        },
+      };
       const t = setTimeout(() => {
         this.#waiters = this.#waiters.filter((w) => w !== waiter);
-        reject(new Error(`[${this.opts.name}] timed out waiting (${timeoutMs}ms). Last messages: ${this.messages.slice(-5).map((m) => m.type).join(', ')}`));
+        reject(
+          new Error(
+            `[${
+              this.opts.name
+            }] timed out waiting (${timeoutMs}ms). Last messages: ${this.messages
+              .slice(-5)
+              .map((m) => m.type)
+              .join(', ')}`,
+          ),
+        );
       }, timeoutMs);
       this.#waiters.push(waiter);
     });
@@ -149,7 +166,12 @@ export class BotClient {
         this.send(ActionEnum.SEND_DRAWING, { image: TINY_PNG, roundNumber });
         break;
       case RoundEnum.VOTE:
-        this.send(ActionEnum.SEND_VOTE, { first: '', second: '', third: '', roundNumber });
+        this.send(ActionEnum.SEND_VOTE, {
+          first: '',
+          second: '',
+          third: '',
+          roundNumber,
+        });
         break;
       case RoundEnum.PRESENT:
         if (this.presenter === this.opts.name) {
@@ -222,7 +244,11 @@ export class BotClient {
         break;
       case ActionEnum.END_ROUND:
         // Like the real client: a server END_ROUND forces a submit
-        if (this.opts.autoPlay && !this.roundDone && (p.roundNumber ?? this.round) === this.round) {
+        if (
+          this.opts.autoPlay &&
+          !this.roundDone &&
+          (p.roundNumber ?? this.round) === this.round
+        ) {
           this.submitRound();
         }
         break;

@@ -1,8 +1,4 @@
-import {
-  ActionEnum,
-  ActionTarget,
-  ReconnectAction,
-} from '@shared/actions';
+import { ActionEnum, ActionTarget, ReconnectAction } from '@shared/actions';
 import { writable } from 'svelte/store';
 
 /**
@@ -83,7 +79,10 @@ class CWebsocket extends ActionTarget<WebSocket, MessageEvent<string>> {
 
     this.addActionListener(ActionEnum.RECONNECT, (action: ReconnectAction) => {
       if (this.#roomName) {
-        saveSession({ roomName: this.#roomName, playerId: action.payload.playerId });
+        saveSession({
+          roomName: this.#roomName,
+          playerId: action.payload.playerId,
+        });
       }
     });
 
@@ -112,7 +111,8 @@ class CWebsocket extends ActionTarget<WebSocket, MessageEvent<string>> {
   connect(roomName: string) {
     if (
       this.#roomName === roomName &&
-      (this.#ws.readyState === WebSocket.OPEN || this.#ws.readyState === WebSocket.CONNECTING)
+      (this.#ws.readyState === WebSocket.OPEN ||
+        this.#ws.readyState === WebSocket.CONNECTING)
     ) {
       return;
     }
@@ -190,7 +190,10 @@ class CWebsocket extends ActionTarget<WebSocket, MessageEvent<string>> {
 
   #scheduleReconnect() {
     clearTimeout(this.#reconnectTimer);
-    const delay = Math.min(1000 * 2 ** this.#reconnectAttempts, MAX_RECONNECT_DELAY_MS);
+    const delay = Math.min(
+      1000 * 2 ** this.#reconnectAttempts,
+      MAX_RECONNECT_DELAY_MS,
+    );
     this.#reconnectAttempts++;
     connectionStatus.set('reconnecting');
     console.log(`WebSocket closed. Reconnecting in ${delay}ms...`);
@@ -232,7 +235,10 @@ class CWebsocket extends ActionTarget<WebSocket, MessageEvent<string>> {
     old.onclose = null;
     old.onopen = null;
     old.onerror = null;
-    if (old.readyState === WebSocket.OPEN || old.readyState === WebSocket.CONNECTING) {
+    if (
+      old.readyState === WebSocket.OPEN ||
+      old.readyState === WebSocket.CONNECTING
+    ) {
       old.close();
     }
   }
@@ -244,7 +250,10 @@ export default ClientWebsocket;
 function getWebsocketUrl(roomName: string): string {
   const serverUrl = import.meta.env.VITE_SERVER_URL;
   // If serverUrl is undefined we use the same origin's /api (nginx locally, the Worker in production)
-  const base = (serverUrl || window.location.origin + '/api').replace(/\/$/, '');
+  const base = (serverUrl || window.location.origin + '/api').replace(
+    /\/$/,
+    '',
+  );
   const url = new URL(`${base}/room/${encodeURIComponent(roomName)}`);
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
 

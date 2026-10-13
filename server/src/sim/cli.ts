@@ -21,7 +21,8 @@ const arg = (name: string, fallback: string) => {
 };
 const baseUrl = arg('url', 'ws://localhost:8787');
 const players = Number(arg('players', '3'));
-const room = () => `SIM-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
+const room = () =>
+  `SIM-${Math.random().toString(36).slice(2, 8).toUpperCase()}`;
 
 const results: { name: string; ok: boolean; ms: number; error?: string }[] = [];
 
@@ -31,7 +32,12 @@ async function scenario(name: string, fn: () => Promise<void>) {
     await fn();
     results.push({ name, ok: true, ms: Date.now() - start });
   } catch (err) {
-    results.push({ name, ok: false, ms: Date.now() - start, error: String(err) });
+    results.push({
+      name,
+      ok: false,
+      ms: Date.now() - start,
+      error: String(err),
+    });
   }
 }
 
@@ -42,7 +48,9 @@ async function main() {
     const bots = await createLobby(baseUrl, room(), players);
     try {
       bots[0].send(ActionEnum.START_GAME);
-      await Promise.all(bots.map((b) => b.waitForType(ActionEnum.END_GAME, 60_000)));
+      await Promise.all(
+        bots.map((b) => b.waitForType(ActionEnum.END_GAME, 60_000)),
+      );
     } finally {
       bots.forEach((b) => b.disconnect());
     }
@@ -53,11 +61,21 @@ async function main() {
     try {
       bots[0].send(ActionEnum.START_GAME);
       const victim = bots[1];
-      await victim.waitFor((m) => m.type === ActionEnum.START_ROUND && m.payload.roundNumber === 2, 30_000);
+      await victim.waitFor(
+        (m) => m.type === ActionEnum.START_ROUND && m.payload.roundNumber === 2,
+        30_000,
+      );
       await victim.refresh();
-      const start = await victim.waitFor((m) => m.type === ActionEnum.START_GAME && !!m.payload.currentRound, 10_000, true);
-      if (start.payload.currentRound < 2) throw new Error(`resumed on round ${start.payload.currentRound}`);
-      await Promise.all(bots.map((b) => b.waitForType(ActionEnum.END_GAME, 60_000)));
+      const start = await victim.waitFor(
+        (m) => m.type === ActionEnum.START_GAME && !!m.payload.currentRound,
+        10_000,
+        true,
+      );
+      if (start.payload.currentRound < 2)
+        throw new Error(`resumed on round ${start.payload.currentRound}`);
+      await Promise.all(
+        bots.map((b) => b.waitForType(ActionEnum.END_GAME, 60_000)),
+      );
     } finally {
       bots.forEach((b) => b.disconnect());
     }
@@ -67,13 +85,19 @@ async function main() {
     const bots = await createLobby(baseUrl, room(), 2, { autoPlay: false });
     try {
       const [, p1] = bots;
-      const twin = new BotClient({ baseUrl, room: p1.opts.room, name: 'p1', autoPlay: false });
+      const twin = new BotClient({
+        baseUrl,
+        room: p1.opts.room,
+        name: 'p1',
+        autoPlay: false,
+      });
       twin.playerId = p1.playerId;
       await twin.connect();
       await twin.waitForType(ActionEnum.JOIN_ROOM, 10_000, true);
       await sleep(300);
       twin.disconnect();
-      if (p1.closeCode !== 4001) throw new Error(`old tab close code ${p1.closeCode}`);
+      if (p1.closeCode !== 4001)
+        throw new Error(`old tab close code ${p1.closeCode}`);
     } finally {
       bots.forEach((b) => b.disconnect());
     }
@@ -102,10 +126,16 @@ async function main() {
   });
 
   for (const r of results) {
-    console.log(`${r.ok ? 'PASS' : 'FAIL'}  ${r.name}  (${r.ms}ms)${r.error ? `\n      ${r.error}` : ''}`);
+    console.log(
+      `${r.ok ? 'PASS' : 'FAIL'}  ${r.name}  (${r.ms}ms)${
+        r.error ? `\n      ${r.error}` : ''
+      }`,
+    );
   }
   const failed = results.filter((r) => !r.ok).length;
-  console.log(failed ? `\n${failed} scenario(s) failed` : '\nAll scenarios passed');
+  console.log(
+    failed ? `\n${failed} scenario(s) failed` : '\nAll scenarios passed',
+  );
   process.exit(failed ? 1 : 0);
 }
 

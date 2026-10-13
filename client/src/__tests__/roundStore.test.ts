@@ -49,7 +49,11 @@ describe('roundStore', () => {
 
   it('rejoining a round you already finished shows the waiting screen', () => {
     jumpToRound(2, 10, true);
-    expect(get(roundStore)).toMatchObject({ number: 2, ongoing: false, timeLeft: 10 });
+    expect(get(roundStore)).toMatchObject({
+      number: 2,
+      ongoing: false,
+      timeLeft: 10,
+    });
     endCurrentRound();
     expect(sendAction).not.toHaveBeenCalled();
   });

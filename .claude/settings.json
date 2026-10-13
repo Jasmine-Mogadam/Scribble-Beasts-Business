@@ -1,0 +1,35 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm run verify)",
+      "Bash(npm run typecheck)",
+      "Bash(npm test)",
+      "Bash(npm run test:*)",
+      "Bash(npm run sim)",
+      "Bash(npm run sim:*)",
+      "Bash(npm run sim -- :*)",
+      "Bash(npm run build)",
+      "Bash(npm run build:*)",
+      "Bash(npm run lint)",
+      "Bash(npm run cf:dev)",
+      "Bash(npm run cf:types)",
+      "Bash(npx vitest run:*)",
+      "Bash(npx tsc --noEmit:*)",
+      "Bash(npx wrangler dev:*)",
+      "Bash(npx wrangler types:*)",
+      "Bash(npx wrangler whoami)",
+      "Bash(git status)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)"
+    ],
+    "ask": [
+      "Bash(npm run deploy)",
+      "Bash(npm run deploy:*)",
+      "Bash(npm run cf:deploy)",
+      "Bash(npm run cf:deploy:*)",
+      "Bash(npx wrangler deploy:*)",
+      "Bash(npx wrangler delete:*)",
+      "Bash(flyctl:*)"
+    ]
+  }
+}

@@ -154,7 +154,10 @@ export class GameRoom extends DurableObject<Env> {
     this.#lastSnapshot = snapshot;
 
     if (snapshot) {
-      const withTime = JSON.stringify({ ...JSON.parse(snapshot), savedAt: Date.now() });
+      const withTime = JSON.stringify({
+        ...JSON.parse(snapshot),
+        savedAt: Date.now(),
+      });
       this.ctx.storage.sql.exec(
         'INSERT INTO kv (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v',
         'lobby',
@@ -177,14 +180,16 @@ export class GameRoom extends DurableObject<Env> {
     const roomless: SocketAdapter[] = [];
     for (const ws of liveSockets) {
       const socket = this.#wrap(ws);
-      const { playerId } = (ws.deserializeAttachment() as SocketAttachment | null) ?? {};
+      const { playerId } =
+        (ws.deserializeAttachment() as SocketAttachment | null) ?? {};
       if (playerId) byPlayerId.set(playerId, socket);
       else roomless.push(socket);
     }
 
     const fresh =
       snapshot &&
-      (byPlayerId.size > 0 || Date.now() - snapshot.savedAt < SNAPSHOT_MAX_AGE_MS);
+      (byPlayerId.size > 0 ||
+        Date.now() - snapshot.savedAt < SNAPSHOT_MAX_AGE_MS);
 
     if (snapshot && fresh && snapshot.players.length > 0) {
       this.#context.expectedRoomName = snapshot.name;
@@ -194,25 +199,36 @@ export class GameRoom extends DurableObject<Env> {
         byPlayerId.delete(saved.id);
         // A player whose socket is gone gets a dead placeholder socket and is
         // marked disconnected below, so they can still reconnect within the timeout.
-        const socket = live ?? new SocketAdapter({ readyState: 3, send() {}, close() {} });
+        const socket =
+          live ?? new SocketAdapter({ readyState: 3, send() {}, close() {} });
         if (!live) socket.markClosed();
         const player =
-          saved.id === snapshot.hostId ? new Host(saved.name, socket) : new Player(saved.name, socket);
+          saved.id === snapshot.hostId
+            ? new Host(saved.name, socket)
+            : new Player(saved.name, socket);
         player.id = saved.id;
         player.score = saved.score;
         players.push(player);
       }
       const host = players.find((p) => p.id === snapshot.hostId) ?? players[0];
-      const room = new Room(snapshot.name, host, snapshot.settings, this.#context);
+      const room = new Room(
+        snapshot.name,
+        host,
+        snapshot.settings,
+        this.#context,
+      );
       this.#context.rooms[snapshot.name] = room;
       for (const player of players) {
         if (player !== host) room.addPlayer(player);
       }
       for (const player of players) {
-        if (player.getWebSocket().readyState !== 1) room.deactivatePlayer(player.name);
+        if (player.getWebSocket().readyState !== 1)
+          room.deactivatePlayer(player.name);
       }
       this.#lastSnapshot = null;
-      console.log(`[GameRoom] restored lobby ${snapshot.name} with ${players.length} players`);
+      console.log(
+        `[GameRoom] restored lobby ${snapshot.name} with ${players.length} players`,
+      );
     } else if (snapshot) {
       this.ctx.storage.sql.exec('DELETE FROM kv WHERE k = ?', 'lobby');
     }

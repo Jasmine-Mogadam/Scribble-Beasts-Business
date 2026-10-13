@@ -3,9 +3,22 @@
  * clients speaking the actual wire protocol. These cover the multiplayer
  * failure modes unit tests can't (refreshes, duplicate tabs, stale messages).
  */
-import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  afterAll,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from 'vitest';
 import { createServer, type GameServer } from '../../app';
-import { BotClient, createLobby, FAST_SETTINGS, sleep } from '../../sim/BotClient';
+import {
+  BotClient,
+  createLobby,
+  FAST_SETTINGS,
+  sleep,
+} from '../../sim/BotClient';
 import { ActionEnum, ActionTarget } from '../../../../shared/actions/index';
 import { RoundEnum, Rounds } from '../../../../shared/rounds/index';
 
@@ -13,7 +26,8 @@ let server: GameServer;
 let baseUrl: string;
 let roomCounter = 0;
 const nextRoom = () => `ROOM${++roomCounter}`;
-const roundIndex = (type: RoundEnum) => Rounds.findIndex((r) => r.roundType === type) + 1;
+const roundIndex = (type: RoundEnum) =>
+  Rounds.findIndex((r) => r.roundType === type) + 1;
 
 beforeAll(async () => {
   ActionTarget.logSends = false;
@@ -42,11 +56,15 @@ describe('full game', () => {
     const [host, p1] = bots;
 
     host.send(ActionEnum.START_GAME);
-    await Promise.all(bots.map((b) => b.waitForType(ActionEnum.END_GAME, 30_000)));
+    await Promise.all(
+      bots.map((b) => b.waitForType(ActionEnum.END_GAME, 30_000)),
+    );
 
     // Each bot saw every round exactly once, in order
     for (const b of bots) {
-      const rounds = b.received(ActionEnum.START_ROUND).map((m) => m.payload.roundNumber);
+      const rounds = b
+        .received(ActionEnum.START_ROUND)
+        .map((m) => m.payload.roundNumber);
       expect(rounds).toEqual(Rounds.map((_, i) => i + 1));
     }
 
@@ -59,7 +77,9 @@ describe('full game', () => {
 
     // …and the host can start a second game
     host.send(ActionEnum.START_GAME);
-    await p1.waitFor((m) => m.type === ActionEnum.START_ROUND && m.payload.roundNumber === 1);
+    await p1.waitFor(
+      (m) => m.type === ActionEnum.START_ROUND && m.payload.roundNumber === 1,
+    );
   }, 40_000);
 
   it('ignores a duplicate START_GAME while a game is running', async () => {
@@ -76,10 +96,16 @@ describe('full game', () => {
 
 describe('reconnect / refresh', () => {
   it('refresh mid-round resumes the same round with the remaining time', async () => {
-    bots = await createLobby(baseUrl, nextRoom(), 2, { autoPlay: false }, {
-      ...FAST_SETTINGS,
-      roundTimers: { ...FAST_SETTINGS.roundTimers, [RoundEnum.SCRIBBLE]: 30 },
-    });
+    bots = await createLobby(
+      baseUrl,
+      nextRoom(),
+      2,
+      { autoPlay: false },
+      {
+        ...FAST_SETTINGS,
+        roundTimers: { ...FAST_SETTINGS.roundTimers, [RoundEnum.SCRIBBLE]: 30 },
+      },
+    );
     const [host, p1] = bots;
     host.send(ActionEnum.START_GAME);
     await p1.waitForType(ActionEnum.START_ROUND);
@@ -87,7 +113,11 @@ describe('reconnect / refresh', () => {
     await p1.refresh();
     const join = await p1.waitForType(ActionEnum.JOIN_ROOM, 5000, true);
     expect(join.payload.playerName).toBe('p1');
-    const start = await p1.waitFor((m) => m.type === ActionEnum.START_GAME && !!m.payload.currentRound, 5000, true);
+    const start = await p1.waitFor(
+      (m) => m.type === ActionEnum.START_GAME && !!m.payload.currentRound,
+      5000,
+      true,
+    );
     expect(start.payload.currentRound).toBe(1);
     expect(start.payload.roundDone).toBe(false);
     expect(start.payload.timer).toBeGreaterThan(25);
@@ -95,10 +125,16 @@ describe('reconnect / refresh', () => {
   });
 
   it('refresh after submitting does not re-open the round', async () => {
-    bots = await createLobby(baseUrl, nextRoom(), 2, { autoPlay: false }, {
-      ...FAST_SETTINGS,
-      roundTimers: { ...FAST_SETTINGS.roundTimers, [RoundEnum.SCRIBBLE]: 30 },
-    });
+    bots = await createLobby(
+      baseUrl,
+      nextRoom(),
+      2,
+      { autoPlay: false },
+      {
+        ...FAST_SETTINGS,
+        roundTimers: { ...FAST_SETTINGS.roundTimers, [RoundEnum.SCRIBBLE]: 30 },
+      },
+    );
     const [host, p1] = bots;
     host.send(ActionEnum.START_GAME);
     await p1.waitForType(ActionEnum.START_ROUND);
@@ -106,7 +142,11 @@ describe('reconnect / refresh', () => {
     await host.waitForType(ActionEnum.PLAYER_DONE);
 
     await p1.refresh();
-    const start = await p1.waitFor((m) => m.type === ActionEnum.START_GAME && !!m.payload.currentRound, 5000, true);
+    const start = await p1.waitFor(
+      (m) => m.type === ActionEnum.START_GAME && !!m.payload.currentRound,
+      5000,
+      true,
+    );
     expect(start.payload.roundDone).toBe(true);
     expect(start.payload.playersDone).toEqual(['p1']);
 
@@ -118,17 +158,31 @@ describe('reconnect / refresh', () => {
   });
 
   it('an unload autosave keeps the drawing without marking the player done', async () => {
-    bots = await createLobby(baseUrl, nextRoom(), 2, { autoPlay: false }, {
-      ...FAST_SETTINGS,
-      roundTimers: { ...FAST_SETTINGS.roundTimers, [RoundEnum.SCRIBBLE]: 30 },
-    });
+    bots = await createLobby(
+      baseUrl,
+      nextRoom(),
+      2,
+      { autoPlay: false },
+      {
+        ...FAST_SETTINGS,
+        roundTimers: { ...FAST_SETTINGS.roundTimers, [RoundEnum.SCRIBBLE]: 30 },
+      },
+    );
     const [host, p1] = bots;
     host.send(ActionEnum.START_GAME);
     await p1.waitForType(ActionEnum.START_ROUND);
     const wip = 'data:image/png;base64,V0lQ';
-    p1.send(ActionEnum.SEND_DRAWING, { image: wip, roundNumber: 1, autosave: true });
+    p1.send(ActionEnum.SEND_DRAWING, {
+      image: wip,
+      roundNumber: 1,
+      autosave: true,
+    });
     await p1.refresh();
-    const start = await p1.waitFor((m) => m.type === ActionEnum.START_GAME && !!m.payload.currentRound, 5000, true);
+    const start = await p1.waitFor(
+      (m) => m.type === ActionEnum.START_GAME && !!m.payload.currentRound,
+      5000,
+      true,
+    );
     expect(start.payload.roundDone).toBe(false);
     await sleep(100);
     const drawings = p1.received(ActionEnum.SEND_DRAWING);
@@ -140,13 +194,23 @@ describe('reconnect / refresh', () => {
     bots = await createLobby(baseUrl, nextRoom(), 3);
     const [host, p1] = bots;
     host.send(ActionEnum.START_GAME);
-    await p1.waitFor((m) => m.type === ActionEnum.START_ROUND && m.payload.roundNumber === 2);
+    await p1.waitFor(
+      (m) => m.type === ActionEnum.START_ROUND && m.payload.roundNumber === 2,
+    );
     await p1.refresh();
-    await Promise.all(bots.map((b) => b.waitForType(ActionEnum.END_GAME, 30_000)));
+    await Promise.all(
+      bots.map((b) => b.waitForType(ActionEnum.END_GAME, 30_000)),
+    );
   }, 40_000);
 
   it('refresh during the intro restores the intro', async () => {
-    bots = await createLobby(baseUrl, nextRoom(), 2, { autoPlay: false }, { ...FAST_SETTINGS, skipIntro: false });
+    bots = await createLobby(
+      baseUrl,
+      nextRoom(),
+      2,
+      { autoPlay: false },
+      { ...FAST_SETTINGS, skipIntro: false },
+    );
     const [host, p1] = bots;
     host.send(ActionEnum.START_GAME);
     await p1.waitForType(ActionEnum.INTRO_START);
@@ -167,7 +231,12 @@ describe('reconnect / refresh', () => {
   it('a duplicated tab replaces the old one without a reconnect fight', async () => {
     bots = await createLobby(baseUrl, nextRoom(), 2, { autoPlay: false });
     const [, p1] = bots;
-    const twin = new BotClient({ baseUrl, room: p1.opts.room, name: 'p1', autoPlay: false });
+    const twin = new BotClient({
+      baseUrl,
+      room: p1.opts.room,
+      name: 'p1',
+      autoPlay: false,
+    });
     bots.push(twin);
     twin.playerId = p1.playerId;
     await twin.connect();
@@ -177,22 +246,39 @@ describe('reconnect / refresh', () => {
   });
 
   it('rejoining by name reclaims a disconnected seat mid-game', async () => {
-    bots = await createLobby(baseUrl, nextRoom(), 2, { autoPlay: false }, {
-      ...FAST_SETTINGS,
-      roundTimers: { ...FAST_SETTINGS.roundTimers, [RoundEnum.SCRIBBLE]: 30 },
-    });
+    bots = await createLobby(
+      baseUrl,
+      nextRoom(),
+      2,
+      { autoPlay: false },
+      {
+        ...FAST_SETTINGS,
+        roundTimers: { ...FAST_SETTINGS.roundTimers, [RoundEnum.SCRIBBLE]: 30 },
+      },
+    );
     const [host, p1] = bots;
     host.send(ActionEnum.START_GAME);
     await p1.waitForType(ActionEnum.START_ROUND);
     p1.disconnect();
-    await host.waitFor((m) => m.type === ActionEnum.PLAYER_LIST_CHANGE && m.payload.playerList.length === 1);
+    await host.waitFor(
+      (m) =>
+        m.type === ActionEnum.PLAYER_LIST_CHANGE &&
+        m.payload.playerList.length === 1,
+    );
 
     // Same name, brand-new session (e.g. reopened the browser)
-    const again = new BotClient({ baseUrl, room: p1.opts.room, name: 'p1', autoPlay: false });
+    const again = new BotClient({
+      baseUrl,
+      room: p1.opts.room,
+      name: 'p1',
+      autoPlay: false,
+    });
     bots.push(again);
     await again.connect();
     again.join();
-    const start = await again.waitFor((m) => m.type === ActionEnum.START_GAME && !!m.payload.currentRound);
+    const start = await again.waitFor(
+      (m) => m.type === ActionEnum.START_GAME && !!m.payload.currentRound,
+    );
     expect(start.payload.currentRound).toBe(1);
     expect(again.playerId).toBe(p1.playerId);
   });
@@ -200,10 +286,16 @@ describe('reconnect / refresh', () => {
 
 describe('round integrity', () => {
   it('ignores round actions stamped with a previous round number', async () => {
-    bots = await createLobby(baseUrl, nextRoom(), 2, { autoPlay: false }, {
-      ...FAST_SETTINGS,
-      roundTimers: { ...FAST_SETTINGS.roundTimers, [RoundEnum.SCRIBBLE]: 30 },
-    });
+    bots = await createLobby(
+      baseUrl,
+      nextRoom(),
+      2,
+      { autoPlay: false },
+      {
+        ...FAST_SETTINGS,
+        roundTimers: { ...FAST_SETTINGS.roundTimers, [RoundEnum.SCRIBBLE]: 30 },
+      },
+    );
     const [host, p1] = bots;
     host.send(ActionEnum.START_GAME);
     await p1.waitForType(ActionEnum.START_ROUND);
@@ -218,21 +310,39 @@ describe('round integrity', () => {
     // completes on any END_ROUND. Old clients replied to END_ROUND after the
     // next round had already started and skipped it.
     const eotw = roundIndex(RoundEnum.END_OF_THE_WORLD);
-    bots = await createLobby(baseUrl, nextRoom(), 2, { autoPlay: false }, {
-      ...FAST_SETTINGS,
-      roundTimers: { ...FAST_SETTINGS.roundTimers, [RoundEnum.END_OF_THE_WORLD]: 30 },
-    });
+    bots = await createLobby(
+      baseUrl,
+      nextRoom(),
+      2,
+      { autoPlay: false },
+      {
+        ...FAST_SETTINGS,
+        roundTimers: {
+          ...FAST_SETTINGS.roundTimers,
+          [RoundEnum.END_OF_THE_WORLD]: 30,
+        },
+      },
+    );
     const [host, p1] = bots;
     host.send(ActionEnum.START_GAME);
     for (let r = 1; r < eotw; r++) {
-      await p1.waitFor((m) => m.type === ActionEnum.START_ROUND && m.payload.roundNumber === r);
+      await p1.waitFor(
+        (m) => m.type === ActionEnum.START_ROUND && m.payload.roundNumber === r,
+      );
       host.submitRound(r);
       p1.submitRound(r);
     }
-    await p1.waitFor((m) => m.type === ActionEnum.START_ROUND && m.payload.roundNumber === eotw);
+    await p1.waitFor(
+      (m) =>
+        m.type === ActionEnum.START_ROUND && m.payload.roundNumber === eotw,
+    );
     p1.send(ActionEnum.END_ROUND, { roundNumber: eotw - 1 });
     await sleep(200);
-    expect(host.received(ActionEnum.PLAYER_DONE).filter((m) => m.payload.playerName === 'p1')).toHaveLength(eotw - 1);
+    expect(
+      host
+        .received(ActionEnum.PLAYER_DONE)
+        .filter((m) => m.payload.playerName === 'p1'),
+    ).toHaveLength(eotw - 1);
   });
 
   it('only the current host can start the game', async () => {
@@ -255,7 +365,10 @@ describe('round integrity', () => {
     const bot = new BotClient({ baseUrl, room: nextRoom(), name: 'x' });
     bots = [bot];
     await bot.connect();
-    bot.send(ActionEnum.CREATE_ROOM, { roomName: 'SOMEWHERE ELSE', hostName: 'x' });
+    bot.send(ActionEnum.CREATE_ROOM, {
+      roomName: 'SOMEWHERE ELSE',
+      hostName: 'x',
+    });
     const err = await bot.waitForType(ActionEnum.ROOM_ERROR);
     expect(err.payload.roomInputMessage).toMatch(/wrong room/i);
   });
