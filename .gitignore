@@ -151,3 +151,7 @@ shared/actions/index.d.ts
 .wrangler/
 .dev.vars
 cloudflare.env
+
+# Playwright
+test-results/
+playwright-report/
