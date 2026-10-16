@@ -53,6 +53,11 @@ npm run sim -- --url wss://scribble-beasts.com --players 3
 
 ## Invariants to keep (each has a test)
 
+- A round's data messages (`SEND_DRAWING`, `SEND_EOTW`, `SEND_ALL_BEASTS`, …) reach
+  the client **before** its `START_ROUND` / reconnect `START_GAME`: components
+  read the stores once on mount. Bots can't catch a component crash, so after
+  changing round UI also render it with empty stores (see `EotwRound.test.ts`).
+
 - Round-scoped messages carry `roundNumber` (server 1-indexed). Server ignores
   stale ones; client `endCurrentRound(…, roundNumber)` ignores stale ones.
   Capture the round **before** any `await` in a round component (`myRound`).

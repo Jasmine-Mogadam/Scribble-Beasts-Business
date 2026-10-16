@@ -124,6 +124,42 @@ describe('reconnect / refresh', () => {
     expect(start.payload.timer).toBeLessThanOrEqual(30);
   });
 
+  it('refreshing mid-round delivers the round data before START_GAME', async () => {
+    const eotw = roundIndex(RoundEnum.END_OF_THE_WORLD);
+    bots = await createLobby(
+      baseUrl,
+      nextRoom(),
+      2,
+      {},
+      {
+        ...FAST_SETTINGS,
+        roundTimers: {
+          ...FAST_SETTINGS.roundTimers,
+          [RoundEnum.END_OF_THE_WORLD]: 30,
+        },
+      },
+    );
+    const [host, p1] = bots;
+    host.send(ActionEnum.START_GAME);
+    await p1.waitFor(
+      (m) => m.type === ActionEnum.START_ROUND && m.payload.roundNumber === eotw,
+      20_000,
+    );
+
+    const before = p1.messages.length;
+    await p1.refresh();
+    await p1.waitFor(
+      (m) => m.type === ActionEnum.START_GAME && !!m.payload.currentRound,
+      5000,
+      true,
+    );
+    const after = p1.messages.slice(before).map((m) => m.type);
+    expect(after.indexOf(ActionEnum.SEND_EOTW)).toBeGreaterThan(-1);
+    expect(after.indexOf(ActionEnum.SEND_EOTW)).toBeLessThan(
+      after.lastIndexOf(ActionEnum.START_GAME),
+    );
+  });
+
   it('refresh after submitting does not re-open the round', async () => {
     bots = await createLobby(
       baseUrl,
@@ -285,6 +321,44 @@ describe('reconnect / refresh', () => {
 });
 
 describe('round integrity', () => {
+  it("each round's data arrives before its START_ROUND (components read it once, on mount)", async () => {
+    const room = nextRoom();
+    bots = await createLobby(baseUrl, room, 3);
+    bots[0].send(ActionEnum.START_GAME);
+    await Promise.all(
+      bots.map((b) => b.waitForType(ActionEnum.END_GAME, 30_000)),
+    );
+
+    const dataFor: Partial<Record<RoundEnum, ActionEnum>> = {
+      [RoundEnum.SCRIBBLE]: ActionEnum.SEND_DRAWING,
+      [RoundEnum.LINE]: ActionEnum.SEND_DRAWING,
+      [RoundEnum.COLOR]: ActionEnum.SEND_DRAWING,
+      [RoundEnum.DETAIL]: ActionEnum.SEND_DRAWING,
+      [RoundEnum.NAME]: ActionEnum.SEND_DRAWING,
+      [RoundEnum.END_OF_THE_WORLD]: ActionEnum.SEND_EOTW,
+      [RoundEnum.PRESENT]: ActionEnum.PRESENTER_CHANGE,
+      [RoundEnum.VOTE]: ActionEnum.SEND_ALL_BEASTS,
+      [RoundEnum.WINNERS]: ActionEnum.SEND_WINNERS,
+    };
+    for (const bot of bots) {
+      const types = bot.messages.map((m) => m.type);
+      let previousStart = -1;
+      Rounds.forEach((round, i) => {
+        const start = bot.messages.findIndex(
+          (m) => m.type === ActionEnum.START_ROUND && m.payload.roundNumber === i + 1,
+        );
+        const expected = dataFor[round.roundType]!;
+        const dataIndex = types.lastIndexOf(expected, start);
+        expect(start, `${bot.opts.name} START_ROUND ${round.roundType}`).toBeGreaterThan(-1);
+        expect(
+          dataIndex,
+          `${bot.opts.name}: ${expected} must precede START_ROUND of ${round.roundType}`,
+        ).toBeGreaterThan(previousStart);
+        previousStart = start;
+      });
+    }
+  });
+
   it('ignores round actions stamped with a previous round number', async () => {
     bots = await createLobby(
       baseUrl,

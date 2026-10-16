@@ -144,10 +144,11 @@ export class Game {
     this.completedPlayers = new Set();
     this.betweenRounds = false;
 
-    // START_ROUND goes out before setup so round data (images, presenter, …)
-    // always arrives at clients that are already in the new round.
-    this.#sendActionToAllPlayers(new Actions.StartRound(timeout, this.currentRoundNumber));
+    // setup() sends the round's data (starting image, EOTW card, beasts, …) and
+    // MUST come before START_ROUND: round components read that data once, when
+    // they mount. Round numbers keep any earlier-arriving data from being misapplied.
     this.currentRound.setup(this.players);
+    this.#sendActionToAllPlayers(new Actions.StartRound(timeout, this.currentRoundNumber));
 
     await this.waitForRoundEnd(
       this.currentRound.expectedActions,
@@ -276,17 +277,19 @@ export class Game {
     const playersDone = this.players
       .filter((p) => this.completedPlayers.has(p.id))
       .map((p) => p.name);
+    // Round data first, START_GAME last: the round component mounts on
+    // START_GAME and reads this data once, so it must already be in the stores.
+    const lastDrawing = this.playerDrawings[player.id];
+    if (lastDrawing) {
+      player.sendAction(new Actions.SendDrawing(lastDrawing));
+    }
+    this.currentRound?.sendReconnectState(player);
     player.sendAction(
       new Actions.StartGame(this.currentRoundNumber, this.getRemainingTime(), {
         roundDone: this.betweenRounds || this.completedPlayers.has(player.id),
         playersDone,
       }),
     );
-    const lastDrawing = this.playerDrawings[player.id];
-    if (lastDrawing) {
-      player.sendAction(new Actions.SendDrawing(lastDrawing));
-    }
-    this.currentRound?.sendReconnectState(player);
   }
 
   /** Stop all game timers (room destroyed). Pending awaits simply never resume. */

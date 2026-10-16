@@ -13,12 +13,12 @@
       <div class="card-face card-front">
         <div class="img-container">
           <img
-            src={$eotwCard.image}
+            src={$eotwCard?.image}
             alt="Silly photorealistic collage that displays the problem described below."
           />
         </div>
         <div class="description-container">
-          <p>{$eotwCard.description}</p>
+          <p>{$eotwCard?.description ?? ''}</p>
         </div>
       </div>
       <div class="card-face card-back">
